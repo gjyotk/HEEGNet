@@ -37,7 +37,7 @@ def swd_loss(x_flatten: Tensor, domains: Tensor):
         loss += horo_hyper_sliced_wasserstein_lorentz(x, x_gaussian, 1000, device=x.device, p=2)
     return loss
 
-def load_dataset(path_):
+def load_dataset(path_, cache_path=None):
 
     label_9class = np.array([
         0,0,0,
@@ -51,21 +51,26 @@ def load_dataset(path_):
         8,8,8
     ], dtype=int)
 
+    if cache_path is None:
+        cache_path = os.path.join(os.path.dirname(os.path.abspath(path_)), 'faced_data')
+
     for i in range(123):
         path = f'{path_}/sub{i:03d}.pkl'
         with open(path, 'rb') as f:
             data = pickle.load(f)
-        path_new = f'./faced_data/subject_{i}/session_1/'
-        if not os.path.exists(path_new):
+        path_new = os.path.join(cache_path, f'subject_{i}', 'session_1')
+        eeg_cache_path = os.path.join(path_new, 'eeg.npy')
+        label_cache_path = os.path.join(path_new, 'label.npy')
+        if not (os.path.exists(eeg_cache_path) and os.path.exists(label_cache_path)):
             os.makedirs(path_new, exist_ok=True)
-            np.save(os.path.join(path_new, 'eeg.npy'), data)
-            np.save(os.path.join(path_new, 'label.npy'), label_9class)
+            np.save(eeg_cache_path, data)
+            np.save(label_cache_path, label_9class)
 
     all_data = []
     all_labels = []
     all_subjects = []
     all_sessions = []
-    base_path ='./faced_data'
+    base_path = cache_path
     # Get all subject folders
     subject_folders = [f for f in os.listdir(base_path) if f.startswith('subject_')]
     subject_folders.sort()  # Ensure consistent ordering

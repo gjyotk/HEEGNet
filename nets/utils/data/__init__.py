@@ -3,6 +3,7 @@ from torch.utils.data import Dataset, Subset, DataLoader, Sampler
 from pandas import DataFrame
 from sklearn.model_selection import StratifiedKFold
 import numpy as np
+from itertools import cycle
 
 from typing import Iterator
 
@@ -64,7 +65,7 @@ class StratifiedDomainSampler():
             print("Warning: fewer domains than domain_per_batch. Adjusted parameter.")
             print(f"domains: {domains_per_batch}->{self.domains_per_batch} samples_per_domain: {samples_per_domain}->{self.samples_per_domain}")
 
-        self.domaincounts = torch.LongTensor((counts/self.samples_per_domain).tolist())
+        self.domaincounts = torch.ceil(counts / self.samples_per_domain).to(dtype=torch.long)
         
         self.domaindict = {}
         for domix, _ in enumerate(du):
@@ -81,13 +82,12 @@ class StratifiedDomainSampler():
                 permidxs = torch.randperm(self.domaindict[domain].shape[0])
             else:
                 permidxs = range(self.domaindict[domain].shape[0])
-            generators[domain] = \
-                iter(
-                    StratifiedSampler(
-                        self.stratvar[self.domaindict[domain]], 
-                        batch_size=self.samples_per_domain,
-                        shuffle=self.shuffle
-                    ))
+            stratified_indices = StratifiedSampler(
+                self.stratvar[self.domaindict[domain]],
+                batch_size=self.samples_per_domain,
+                shuffle=self.shuffle,
+            )
+            generators[domain] = cycle(stratified_indices)
 
         while domaincounts.sum() > 0:
 

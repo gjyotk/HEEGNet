@@ -32,7 +32,8 @@ class Trainer:
 
         model = model.to(dtype=self.dtype_, device=self.device_)
 
-        self.optimizer = model.configure_optimizers(lr=self.lr, weight_decay=self.weight_decay)
+        optimizer_model = model.module if isinstance(model, torch.nn.DataParallel) else model
+        self.optimizer = optimizer_model.configure_optimizers(lr=self.lr, weight_decay=self.weight_decay)
 
         [callback.on_fit_start(self, model) for callback in self.callbacks]
 
@@ -80,12 +81,13 @@ class Trainer:
         for batch_idx, batch in enumerate(train_dataloader):
             [callback.on_train_batch_start(self, model, batch, batch_idx) for callback in self.callbacks]
             features, y = batch
-            features['inputs'] = features['inputs'].to(dtype=self.dtype_, device=self.device_)
-            y = y.to(device=self.device_)
+            features['inputs'] = features['inputs'].to(dtype=self.dtype_, device=self.device_, non_blocking=True)
+            features['domains'] = features['domains'].to(device=self.device_, non_blocking=True)
+            y = y.to(device=self.device_, non_blocking=True)
             #feature=features['inputs'].unsqueeze(1)  
             #domain = features['domains'].to(dtype=self.dtype_,device=self.device_)
             #features['inputs'] = features['inputs'].to(dtype=self.dtype_, device=self.device_)
-            y = y.to(device=self.device_)
+            y = y.to(device=self.device_, non_blocking=True)
             pred, x_flatten = model(**features)
             cn_loss = self.loss_fn(pred, y)
             if self.swd_weight !=0:
@@ -110,10 +112,11 @@ class Trainer:
 
         with torch.no_grad():
             for batch_ix, (features, y) in enumerate(dataloader):
-                features['inputs'] = features['inputs'].to(dtype=self.dtype_, device=self.device_)
-                y = y.to(device=self.device_)
+                features['inputs'] = features['inputs'].to(dtype=self.dtype_, device=self.device_, non_blocking=True)
+                features['domains'] = features['domains'].to(device=self.device_, non_blocking=True)
+                y = y.to(device=self.device_, non_blocking=True)
                   
-                features['inputs'] = features['inputs'].to(dtype=self.dtype_, device=self.device_)
+                features['inputs'] = features['inputs'].to(dtype=self.dtype_, device=self.device_, non_blocking=True)
                 #domain = features['domains'].to(dtype=self.dtype_,device=self.device_)
                 #feature=features['inputs'].unsqueeze(1)
                 pred,_ = model(**features)     
@@ -122,9 +125,12 @@ class Trainer:
                 y_true.append(y)
                 y_hat.append(pred.argmax(1))
 
-        loss /= batch_ix + 1
+            if not y_true:
+                raise ValueError("The dataloader produced no batches.")
 
-        score = balanced_accuracy_score(torch.cat(y_true).detach().cpu().numpy(), torch.cat(y_hat).detach().cpu().numpy()).item()
+            loss /= len(y_true)
+
+        score = balanced_accuracy_score(torch.cat(y_true).detach().cpu().numpy(), torch.cat(y_hat).detach().cpu().numpy())
 
         return dict(loss=loss, score=score)
 

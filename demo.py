@@ -11,6 +11,7 @@ from copy import deepcopy
 import nets.batchnorm as bn
 import numpy as np
 import warnings
+import os
 # %% [markdown]
 # ## configuration for alignment
 # 
@@ -23,9 +24,11 @@ import warnings
 # %%
 # network and training configuration
 cfg = dict(
-    epochs = 100,
-    batch_size_train = 50,
+    reference_epochs = 100,
+    reference_batch_size = 50,
+    batch_size_train = 200,
     domains_per_batch = 5,
+    num_workers = min(8, os.cpu_count() or 1),
     validation_size = 0.2,
     evaluation = 'inter-subject', 
     dtype = torch.float64,
@@ -40,10 +43,19 @@ cfg = dict(
 )
 )
 
+cfg['epochs'] = max(
+    1,
+    round(cfg['reference_epochs'] * cfg['reference_batch_size'] / cfg['batch_size_train'])
+)
+cfg['min_epochs'] = min(70, max(1, cfg['epochs'] - 1))
+print(f"Training for {cfg['epochs']} epochs (batch size {cfg['batch_size_train']})")
+
 if torch.cuda.is_available():
-    device = torch.device('cuda:0')
-    print('GPU')
+    gpu_ids = list(range(torch.cuda.device_count()))
+    device = torch.device(f'cuda:{gpu_ids[0]}')
+    print(f'GPU ({len(gpu_ids)} available: {gpu_ids})')
 else:
+    gpu_ids = []
     device = torch.device('cpu')
     print('CPU')
 
@@ -59,8 +71,9 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 # input the data path and load the data
 dataset='faced'
 n_classes = 9
-loading_path=''
-data, labels, subjects, sessions = fn.load_dataset(loading_path)
+loading_path='/tmp/cv13/heegnet_synapse/Processed_data'
+cache_path='/tmp/cv13/heegnet_synapse/faced_data'
+data, labels, subjects, sessions = fn.load_dataset(loading_path, cache_path=cache_path)
 
 # grouping each subject-session as a domain
 domain_labels = [f"{sub}_{sess}" for sub, sess in zip(subjects, sessions)]
@@ -75,7 +88,12 @@ X=data.copy()
 # %%
 def sfuda_offline(dataset : DomainDataset, model : HEEGNet):
     model.eval()
-    model.domainadapt_finetune(dataset.features.to(dtype=cfg['dtype'], device=device), dataset.labels.to(device=device), dataset.domains, None)
+    model.domainadapt_finetune(
+        dataset.features.to(dtype=cfg['dtype'], device=device, non_blocking=True),
+        dataset.labels.to(device=device, non_blocking=True),
+        dataset.domains.to(device=device, non_blocking=True),
+        None
+    )
 
 # %% [markdown]
 # ## load a MOABB dataset
@@ -136,12 +154,30 @@ for ix_fold, (fit, test) in enumerate(cv_outer.split(X, y, cv_outer_group)):
     # for training use specific loader/sampler so taht 
     # batches contain a specific number of domains with equal observations per domain
     # and stratified labels
-    loader_train = StratifiedDomainDataLoader(ds_train, cfg['batch_size_train'], domains_per_batch=domains_per_batch, shuffle=True, drop_last = False)
-    loader_val = torch.utils.data.DataLoader(ds_val, batch_size=len(ds_val))
+    loader_kwargs = dict(
+        num_workers=cfg['num_workers'],
+        pin_memory=torch.cuda.is_available(),
+        persistent_workers=cfg['num_workers'] > 0,
+    )
+    loader_train = StratifiedDomainDataLoader(
+        ds_train,
+        cfg['batch_size_train'],
+        domains_per_batch=domains_per_batch,
+        shuffle=True,
+        drop_last=False,
+        **loader_kwargs,
+    )
+    loader_val = torch.utils.data.DataLoader(
+        ds_val,
+        batch_size=len(ds_val),
+        **loader_kwargs,
+    )
     test_domain=domain[test].unique()
 
     # create the model and training configuration
     model = HEEGNet(device=device,dtype=cfg['dtype'],**mdl_kwargs).to(device=device, dtype=cfg['dtype'])
+    if len(gpu_ids) > 1:
+        model = torch.nn.DataParallel(model, device_ids=gpu_ids, output_device=gpu_ids[0])
     # early stopping
     es = EarlyStopping(metric='val_loss', higher_is_better=False, patience=20, verbose=False)
     # batchnorm momentum scheduler
@@ -155,7 +191,7 @@ for ix_fold, (fit, test) in enumerate(cv_outer.split(X, y, cv_outer_group)):
     # create the trainer
     trainer = Trainer(
         max_epochs= cfg['epochs'],
-        min_epochs= 70,
+        min_epochs= cfg['min_epochs'],
         callbacks=[es,bn_sched],
         loss=torch.nn.CrossEntropyLoss(),
         device=device, 
@@ -167,7 +203,7 @@ for ix_fold, (fit, test) in enumerate(cv_outer.split(X, y, cv_outer_group)):
     # fit the model
     trainer.fit(model, train_dataloader=loader_train, val_dataloader=loader_val)
     print(f'ES best epoch={es.best_epoch}')
-    sfuda_offline_net= deepcopy(model)
+    sfuda_offline_net = deepcopy(model.module if isinstance(model, torch.nn.DataParallel) else model)
 
     # evaluation
     test_domain=domain[test].unique()
