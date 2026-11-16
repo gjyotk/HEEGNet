@@ -1,0 +1,25 @@
+{
+  "dataset": "THINGS-EEG2 (Test partition)",
+  "n_classes": 200,
+  "n_subjects": 10,
+  "n_sessions": 4,
+  "reps_per_session": 20,
+  "total_repetitions": 80,
+  "n_channels": 63,
+  "channel_slice": [
+    0,
+    63
+  ],
+  "time_window_ms": [
+    0.0,
+    790.0
+  ],
+  "time_slice_indices": [
+    20,
+    100
+  ],
+  "sampling_rate_hz": 100,
+  "split_method": "even_odd (10 reps vs 10 reps)",
+  "covariance_estimator": "Ledoit-Wolf shrinkage",
+  "unbiased_crossnobis": true
+}

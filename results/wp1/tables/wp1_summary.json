@@ -1,0 +1,31 @@
+{
+  "elapsed_seconds": 613.2,
+  "quick_mode": false,
+  "subjects_evaluated": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10
+  ],
+  "candidate_config": {
+    "channels": "occ_par",
+    "time_window_ms": "100\u2013290 ms",
+    "time_slice": [
+      30,
+      50
+    ]
+  },
+  "task_1_2_grand_mean_delta_r": -0.1154,
+  "task_1_3_peak_split_half_ms": 120,
+  "task_1_3_peak_split_half_r": 0.6647,
+  "task_1_4_dev_mean_sh_r": 0.5322,
+  "task_1_4_conf_mean_sh_r": 0.5844,
+  "task_1_5_nc_lower_mean": 0.7268,
+  "task_1_5_nc_upper_mean": 0.7842
+}

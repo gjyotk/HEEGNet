@@ -1,28 +1,31 @@
 #!/usr/bin/env python
 """
-Multi-subject leave-one-subject-out cross-validation on the THINGS-EEG2 dataset
-using HEEGNet.
+Leave-one-subject-out cross-validation on THINGS-EEG2 (test partition) with HEEGNet.
 
-Uses the **test images** partition (200 object concepts, 80 repetitions per
-subject = 4 sessions × 20 reps).  Each repetition is treated as an individual
-trial with label = image concept (0–199) and domain = subject × session.
+Changes vs. the original script
+-------------------------------
+1. EPOCHS is set directly (the old formula 100*50/1000 = 5 epochs was backwards:
+   bigger batches need MORE epochs, not fewer).
+2. MomentumBatchNormScheduler no longer receives a negative epoch count.
+3. Single GPU by default (DataParallel splits the batch across GPUs, which can
+   break domain-specific batch norm and the SWD alignment loss).
+4. Pilot mode: run only a few test subjects first (TEST_SUBJECTS).
+5. SFUDA never sees the real test labels (dummy labels are passed instead), and
+   accuracy is reported both WITH and WITHOUT SFUDA so you can see its effect.
+6. Sanity printouts: time window, and per-block signal stats to help you check
+   whether "20 reps = 1 session" is a valid assumption.
+7. Results file name carries a tag so runs don't overwrite each other.
 
-Usage:
-    python run_things_eeg2_cv.py
+Usage
+-----
+    CUDA_VISIBLE_DEVICES=0 python run_things_eeg2_cv.py
 
-Requires:
-    - Preprocessed zip files in  eeg-dataset/derivatives/preprocessed_eeg/
-      (sub-XX__63_channels.zip, one per subject)
-    - The HEEGNet library in the repository  (nets/, lib/, hsssw/)
-    - PyTorch, scikit-learn, geoopt, etc.
-
-GPU:
-    Automatically detects and uses **all available CUDA GPUs** via
-    ``torch.nn.DataParallel``.
+Still UNVERIFIED (check in nets/):
+    - what model.domainadapt_finetune does with labels
+    - whether reps 0-19 / 20-39 / 40-59 / 60-79 really are sessions 1-4
 """
 
 import os
-import sys
 import json
 import time
 import warnings
@@ -35,9 +38,6 @@ import torch
 import sklearn.model_selection
 import sklearn.preprocessing
 
-# ------------------------------------------------------------------
-# HEEGNet imports (relative to repo root)
-# ------------------------------------------------------------------
 from nets.utils.data import StratifiedDomainDataLoader, DomainDataset
 from nets.trainer import Trainer
 from nets.callbacks import EarlyStopping, MomentumBatchNormScheduler
@@ -54,23 +54,39 @@ PREPROCESSED_DIR = os.path.join(
 )
 
 # ==================================================================
-# Configuration  (mirrors demo.py but adjusted for 200-class task)
+# Experiment switches  (edit these)
 # ==================================================================
-N_CLASSES = 200               # 200 test image concepts
-N_EEG_CHANNELS = 63           # drop the 64th 'stim' channel
-REPS_PER_SESSION = 20         # 20 repetitions per session
-N_SESSIONS = 4                # 4 sessions per subject
+# Every switch can be set from the shell, e.g.
+#   CUDA_VISIBLE_DEVICES=2 TEST_SUBJECTS=3 RUN_TAG=hyp_sub3 EPOCHS=100 python run_things_eeg2_cv.py
+# Comma-separated subjects are allowed: TEST_SUBJECTS=1,2   (unset = all subjects)
+def _env_bool(name, default):
+    return os.environ.get(name, str(default)).strip().lower() in ("1", "true", "yes")
+
+
+RUN_TAG = os.environ.get("RUN_TAG", "baseline_hyperbolic")   # appears in results file name
+_ts = os.environ.get("TEST_SUBJECTS", "").strip()
+TEST_SUBJECTS = [int(s) for s in _ts.split(",") if s] if _ts else None
+USE_MULTI_GPU = _env_bool("USE_MULTI_GPU", False)   # leave False: DataParallel can break domain BN
+USE_SFUDA = _env_bool("USE_SFUDA", True)            # also report source-free adaptation results
+EPOCHS = int(os.environ.get("EPOCHS", 100))         # upper bound; early stopping decides the rest
+DTYPE = torch.float32 if os.environ.get("DTYPE", "float64") == "float32" else torch.float64
+SEED = int(os.environ.get("SEED", 42))
+TRAIN_EVAL_EVERY = int(os.environ.get("TRAIN_EVAL_EVERY", 10))  # full-train-set eval frequency (epochs)
+
+# ==================================================================
+# Dataset constants
+# ==================================================================
+N_CLASSES = 200
+N_EEG_CHANNELS = 63
+REPS_PER_SESSION = 20
+N_SESSIONS = 4
 
 cfg = dict(
-    reference_epochs=100,
-    reference_batch_size=50,
-    batch_size_train=1000,     # larger batch so stratified sampler works
-    domains_per_batch=5,       # → samples_per_domain=200, n_splits=20 ≤ min_class_count
+    batch_size_train=1000,           # -> 200 samples per domain with 5 domains per batch
+    domains_per_batch=5,
     num_workers=min(8, os.cpu_count() or 1),
     validation_size=0.2,
-    evaluation="inter-subject",
-    dtype=torch.float64,
-    training=True,
+    dtype=DTYPE,
     lr=0.001,
     input_align=True,
     weight_decay=1e-4,
@@ -80,24 +96,18 @@ cfg = dict(
         domain_adaptation=True,
     ),
 )
-
-cfg["epochs"] = max(
-    1,
-    round(
-        cfg["reference_epochs"]
-        * cfg["reference_batch_size"]
-        / cfg["batch_size_train"]
-    ),
-)
-cfg["min_epochs"] = min(70, max(1, cfg["epochs"] - 1))
+cfg["epochs"] = EPOCHS
+cfg["min_epochs"] = min(70, max(1, EPOCHS - 1))
+cfg["bn_sched_epochs"] = max(1, EPOCHS - 10)   # never negative
 
 # ==================================================================
-# GPU setup – use all available CUDA GPUs
+# Devices
 # ==================================================================
 if torch.cuda.is_available():
-    gpu_ids = list(range(torch.cuda.device_count()))
+    all_gpus = list(range(torch.cuda.device_count()))
+    gpu_ids = all_gpus if USE_MULTI_GPU else all_gpus[:1]
     device = torch.device(f"cuda:{gpu_ids[0]}")
-    print(f"[GPU] {len(gpu_ids)} GPU(s) available: {gpu_ids}")
+    print(f"[GPU] visible: {all_gpus} | using: {gpu_ids}")
 else:
     gpu_ids = []
     device = torch.device("cpu")
@@ -108,111 +118,142 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 
 
 # ==================================================================
-# Data loading helpers
+# Data loading
 # ==================================================================
 def load_subject_test_data(zip_path: str):
-    """Load preprocessed *test* EEG from a single-subject zip file.
-
-    Returns
-    -------
-    data : np.ndarray, shape (n_images, n_reps, n_channels, n_times)
-        The raw preprocessed EEG epochs (first 63 EEG channels only).
-    ch_names : list[str]
-    times : np.ndarray
-    """
+    """Returns data (n_images, n_reps, 63, n_times), ch_names, times."""
     basename = os.path.splitext(os.path.basename(zip_path))[0]
     npy_name = f"{basename}/preprocessed_eeg_test.npy"
-
     with zipfile.ZipFile(zip_path) as zf:
         with zf.open(npy_name) as fp:
             obj = np.load(fp, allow_pickle=True).item()
-
-    data = obj["preprocessed_eeg_data"][:, :, :N_EEG_CHANNELS, :]  # drop stim
-    ch_names = obj["ch_names"][:N_EEG_CHANNELS]
-    times = obj["times"]
-    return data, ch_names, times
+    data = obj["preprocessed_eeg_data"][:, :, :N_EEG_CHANNELS, :]
+    return data, obj["ch_names"][:N_EEG_CHANNELS], obj["times"]
 
 
 def build_dataset():
-    """Load all valid subjects and flatten into (trials, channels, time).
+    """Flatten to (trials, channels, time) with labels, subject ids, session ids, and repetition ids."""
+    all_X, all_y, all_sub, all_sess, all_rep = [], [], [], [], []
+    printed_times = False
 
-    Returns
-    -------
-    X : np.ndarray  (N, 63, 100)
-    y : np.ndarray  (N,)         image label 0–199
-    subjects : np.ndarray (N,)   subject id
-    sessions : np.ndarray (N,)   session id  0–3
-    """
-    all_X, all_y, all_sub, all_sess = [], [], [], []
-
-    zip_files = sorted(
-        f
-        for f in os.listdir(PREPROCESSED_DIR)
-        if f.endswith(".zip")
-    )
-
+    zip_files = sorted(f for f in os.listdir(PREPROCESSED_DIR) if f.endswith(".zip"))
     for zf_name in zip_files:
         zf_path = os.path.join(PREPROCESSED_DIR, zf_name)
-
-        # Validate zip integrity
         if not zipfile.is_zipfile(zf_path):
-            print(f"  [SKIP] {zf_name} – corrupt or incomplete zip")
+            print(f"  [SKIP] {zf_name} - corrupt or incomplete zip (re-download it!)")
             continue
 
-        # Extract subject id from filename e.g. "sub-01__63_channels.zip"
-        sub_id_str = zf_name.split("__")[0]          # "sub-01"
-        sub_id = int(sub_id_str.split("-")[1])        # 1
-
-        print(f"  Loading {zf_name} (subject {sub_id}) …", end=" ", flush=True)
+        sub_id = int(zf_name.split("__")[0].split("-")[1])
+        print(f"  Loading {zf_name} (subject {sub_id}) ...", end=" ", flush=True)
         t0 = time.time()
         data, ch_names, times = load_subject_test_data(zf_path)
-        # data shape: (200, 80, 63, 100)
         n_images, n_reps, n_ch, n_t = data.shape
 
-        # Split 80 reps into 4 sessions of 20 reps each
-        for sess_idx in range(N_SESSIONS):
-            rep_start = sess_idx * REPS_PER_SESSION
-            rep_end = rep_start + REPS_PER_SESSION
-            session_data = data[:, rep_start:rep_end, :, :]  # (200, 20, 63, 100)
+        if not printed_times:
+            print(f"\n  [INFO] time axis: {times[0]:.3f} -> {times[-1]:.3f} "
+                  f"({len(times)} samples). Check this covers the window you want.")
+            printed_times = True
 
-            # Each of the 20 reps is an individual trial
+        # Sanity check for the session assumption: if blocks of 20 reps are truly
+        # sessions, you may see jumps in overall signal std between blocks.
+        block_std = [
+            float(data[:, s * REPS_PER_SESSION:(s + 1) * REPS_PER_SESSION].std())
+            for s in range(N_SESSIONS)
+        ]
+        print(f"  [INFO] per-block std (sub {sub_id}): "
+              + ", ".join(f"{v:.3f}" for v in block_std), end=" ")
+
+        for sess_idx in range(N_SESSIONS):
+            start = sess_idx * REPS_PER_SESSION
             for rep in range(REPS_PER_SESSION):
-                trial = session_data[:, rep, :, :]  # (200, 63, 100)
+                trial = data[:, start + rep, :, :]           # (200, 63, T)
                 all_X.append(trial)
                 all_y.append(np.arange(n_images))
                 all_sub.append(np.full(n_images, sub_id))
                 all_sess.append(np.full(n_images, sess_idx))
+                all_rep.append(np.full(n_images, rep))
 
-        dt = time.time() - t0
-        print(f"{n_images * n_reps} trials in {dt:.1f}s")
+        print(f"-> {n_images * n_reps} trials in {time.time() - t0:.1f}s")
 
-    X = np.concatenate(all_X, axis=0)       # (N, 63, 100)
-    y = np.concatenate(all_y, axis=0)       # (N,)
+    X = np.concatenate(all_X, axis=0)
+    y = np.concatenate(all_y, axis=0)
     subjects = np.concatenate(all_sub, axis=0)
     sessions = np.concatenate(all_sess, axis=0)
-
-    print(
-        f"\n  Total: {X.shape[0]} trials, "
-        f"{len(np.unique(subjects))} subjects, "
-        f"{N_SESSIONS} sessions, "
-        f"{N_CLASSES} classes, "
-        f"EEG shape per trial: {X.shape[1:]}"
-    )
-    return X, y, subjects, sessions
+    reps = np.concatenate(all_rep, axis=0)
+    print(f"\n  Total: {X.shape[0]} trials, {len(np.unique(subjects))} subjects, "
+          f"{N_SESSIONS} sessions, {N_CLASSES} classes, trial shape {X.shape[1:]}")
+    return X, y, subjects, sessions, reps
 
 
 # ==================================================================
-# SFUDA offline adaptation (same as demo.py)
+# Source-free domain adaptation
 # ==================================================================
 def sfuda_offline(dataset: DomainDataset, model: HEEGNet):
-    """Source-free unsupervised domain adaptation (offline)."""
+    """Adapt on an unlabeled test domain.
+
+    Checked in nets/model.py: HEEGNet.domainadapt_finetune ignores `y`; it only
+    re-estimates the domain batch-norm mean/variance (REFIT mode) from the test
+    domain's inputs. No labels are used. We still pass dummy labels as a guard.
+
+    IMPORTANT: an unseen test domain has never been trained on, so without this
+    step its BN statistics stay at their initial values (origin mean, variance 1).
+    The 'plain' numbers are therefore NOT a fair no-adaptation baseline; the
+    SFUDA numbers are the ones comparable to the paper's cross-subject results.
+    """
     model.eval()
+    dummy_labels = torch.zeros_like(dataset.labels)
     model.domainadapt_finetune(
         dataset.features.to(dtype=cfg["dtype"], device=device, non_blocking=True),
-        dataset.labels.to(device=device, non_blocking=True),
+        dummy_labels.to(device=device, non_blocking=True),
         dataset.domains.to(device=device, non_blocking=True),
         None,
     )
+
+
+# ==================================================================
+# Faster trainer
+# ==================================================================
+class FastTrainer(Trainer):
+    """Same as nets.trainer.Trainer, but evaluates the FULL training set only every
+    `train_eval_every` epochs. The original does a complete extra forward pass over
+    the training data after every epoch, which is a large part of the run time.
+    Validation still runs every epoch, so early stopping behaves the same."""
+
+    def __init__(self, *args, train_eval_every=10, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.train_eval_every = train_eval_every
+
+    def fit(self, model, train_dataloader, val_dataloader):
+        model = model.to(dtype=self.dtype_, device=self.device_)
+        opt_model = model.module if isinstance(model, torch.nn.DataParallel) else model
+        self.optimizer = opt_model.configure_optimizers(lr=self.lr, weight_decay=self.weight_decay)
+        [cb.on_fit_start(self, model) for cb in self.callbacks]
+
+        for epoch in range(self.epochs):
+            self.current_epoch = epoch
+            [cb.on_train_epoch_start(self, model) for cb in self.callbacks]
+            self.train_epoch(model, train_dataloader)
+
+            val_res = {f"val_{k}": v for k, v in self.test(model, val_dataloader).items()}
+            self.log_dict(val_res)
+            log_dict = dict(val_res)
+
+            if epoch % self.train_eval_every == 0 or epoch == self.epochs - 1:
+                trn_res = {f"trn_{k}": v for k, v in self.test(model, train_dataloader).items()}
+                self.log_dict(trn_res)
+                log_dict = trn_res | val_res
+
+            if epoch % 10 == 0 or epoch == self.epochs - 1:
+                print(f"epoch={epoch:3d} gd-step={self.current_step:5d}", end=" ")
+                for k, v in log_dict.items():
+                    print(f"{k + '=':10}{v:6.4f}", end=" ")
+                print("")
+
+            [cb.on_train_epoch_end(self, model) for cb in self.callbacks]
+            if self.stop_fit_:
+                break
+
+        [cb.on_fit_end(self, model) for cb in self.callbacks]
 
 
 # ==================================================================
@@ -220,225 +261,161 @@ def sfuda_offline(dataset: DomainDataset, model: HEEGNet):
 # ==================================================================
 def main():
     print("=" * 70)
-    print("HEEGNet – THINGS-EEG2 Multi-Subject Cross-Validation")
+    print(f"HEEGNet - THINGS-EEG2 cross-subject CV   [{RUN_TAG}]")
     print("=" * 70)
-    print(f"Training for {cfg['epochs']} epochs (batch size {cfg['batch_size_train']})")
-    print()
+    print(f"max epochs={cfg['epochs']}  min epochs={cfg['min_epochs']}  "
+          f"batch={cfg['batch_size_train']}  dtype={cfg['dtype']}")
+    print(f"test subjects: {TEST_SUBJECTS if TEST_SUBJECTS else 'ALL'} | SFUDA: {USE_SFUDA}\n")
 
-    # ------------------------------------------------------------------
-    # 1. Load data
-    # ------------------------------------------------------------------
-    print("[1/4] Loading preprocessed test data …")
-    X, y_raw, subjects, sessions = build_dataset()
+    # 1. Data
+    print("[1/4] Loading preprocessed test data ...")
+    X, y_raw, subjects, sessions, reps = build_dataset()
 
-    # ------------------------------------------------------------------
-    # 2. Domain definition: (subject, session)
-    # ------------------------------------------------------------------
+    # 2. Domains = (subject, session)
     domain_labels = [f"{s}_{ss}" for s, ss in zip(subjects, sessions)]
-    domain = sklearn.preprocessing.LabelEncoder().fit_transform(domain_labels)
-    domain = torch.from_numpy(domain)
+    domain = torch.from_numpy(
+        sklearn.preprocessing.LabelEncoder().fit_transform(domain_labels)
+    )
+    assert X.shape[0] == y_raw.shape[0] == subjects.shape[0] == sessions.shape[0] == reps.shape[0]
 
-    assert X.shape[0] == y_raw.shape[0] == subjects.shape[0] == sessions.shape[0]
-
-    # ------------------------------------------------------------------
-    # 3. Input-space alignment (Euler alignment per domain)
-    # ------------------------------------------------------------------
-    print("[2/4] Input-space alignment …")
+    # 3. Per-domain input alignment (unsupervised; uses no labels)
+    print("[2/4] Input-space alignment ...")
     if cfg["input_align"]:
         for i in torch.unique(domain):
             mask = domain == i
             X[mask] = fn.euler_align(X[mask])
 
     X = torch.from_numpy(X)
-    y = sklearn.preprocessing.LabelEncoder().fit_transform(y_raw)
-    y = torch.from_numpy(y)
+    y = torch.from_numpy(sklearn.preprocessing.LabelEncoder().fit_transform(y_raw))
 
-    # ------------------------------------------------------------------
     # 4. Cross-validation
-    # ------------------------------------------------------------------
-    print("[3/4] Starting leave-one-subject-out cross-validation …\n")
+    print("[3/4] Leave-one-subject-out cross-validation ...\n")
+    torch.manual_seed(SEED)
+    np.random.seed(SEED)
 
-    random_seed = 42
-    torch.manual_seed(random_seed)
+    n_subjects = len(np.unique(subjects))
+    cv_outer = (sklearn.model_selection.LeaveOneGroupOut() if n_subjects < 10
+                else sklearn.model_selection.GroupKFold(n_splits=10))
 
-    unique_subjects = np.unique(subjects)
-    n_subjects = len(unique_subjects)
-
-    if n_subjects < 10:
-        cv_outer = sklearn.model_selection.LeaveOneGroupOut()
-    else:
-        cv_outer = sklearn.model_selection.GroupKFold(n_splits=10)
-
-    cv_outer_group = subjects
-
-    # Inner stratification group: domain × label
-    cv_inner_group = np.array(
-        [f"{d.item()}_{l}" for d, l in zip(domain, y)]
-    )
-    cv_inner_group = sklearn.preprocessing.LabelEncoder().fit_transform(
-        cv_inner_group
-    )
-
-    # Model kwargs (data-dependent parts filled here)
     mdl_kwargs = deepcopy(cfg["mdl_kwargs"])
     mdl_kwargs["num_classes"] = N_CLASSES
-    mdl_kwargs["num_electrodes"] = X.shape[1]  # 63
-    mdl_kwargs["chunk_size"] = X.shape[2]      # 100
+    mdl_kwargs["num_electrodes"] = X.shape[1]
+    mdl_kwargs["chunk_size"] = X.shape[2]
     mdl_kwargs["domains"] = torch.unique(domain)
 
     records = []
-    n_folds = cv_outer.get_n_splits(X, y, cv_outer_group)
+    n_folds = cv_outer.get_n_splits(X, y, subjects)
 
-    for ix_fold, (fit_idx, test_idx) in enumerate(
-        cv_outer.split(X, y, cv_outer_group)
-    ):
+    for ix_fold, (fit_idx, test_idx) in enumerate(cv_outer.split(X, y, subjects)):
         test_subs = np.unique(subjects[test_idx])
-        print(f"{'=' * 60}")
-        print(
-            f"  Fold {ix_fold + 1}/{n_folds}  |  "
-            f"test subject(s): {test_subs}"
-        )
-        print(f"{'=' * 60}")
+        if TEST_SUBJECTS is not None and not set(test_subs.tolist()) & set(TEST_SUBJECTS):
+            continue
 
-        # --- inner train / val split ---------------------------------
-        cv_inner = sklearn.model_selection.StratifiedShuffleSplit(
-            n_splits=1, test_size=cfg["validation_size"]
-        )
-        train_idx, val_idx = next(
-            cv_inner.split(X[fit_idx], y[fit_idx], cv_inner_group[fit_idx])
-        )
+        print("=" * 60)
+        print(f"  Fold {ix_fold + 1}/{n_folds} | test subject(s): {test_subs}")
+        print("=" * 60)
+
+        # Repetition-based split within each domain:
+        # Allocates first (1 - val_size) repetitions to train and remaining to val.
+        # This guarantees:
+        # 1. No repeated stimulus observation leakage across train and val.
+        # 2. Perfect class balance (all 200 classes present in train and val).
+        # 3. All training domains are present so domain batch norm statistics are learned.
+        n_val_reps = max(1, int(round(REPS_PER_SESSION * cfg["validation_size"])))
+        n_train_reps = REPS_PER_SESSION - n_val_reps
+        fit_reps = reps[fit_idx]
+        train_idx = np.where(fit_reps < n_train_reps)[0]
+        val_idx = np.where(fit_reps >= n_train_reps)[0]
 
         du = domain[fit_idx][train_idx].unique()
         domains_per_batch = min(cfg["domains_per_batch"], len(du))
 
-        # --- datasets ------------------------------------------------
-        ds_train = DomainDataset(
-            X[fit_idx][train_idx],
-            y[fit_idx][train_idx],
-            domain[fit_idx][train_idx],
-        )
-        ds_val = DomainDataset(
-            X[fit_idx][val_idx],
-            y[fit_idx][val_idx],
-            domain[fit_idx][val_idx],
-        )
+        ds_train = DomainDataset(X[fit_idx][train_idx], y[fit_idx][train_idx],
+                                 domain[fit_idx][train_idx])
+        ds_val = DomainDataset(X[fit_idx][val_idx], y[fit_idx][val_idx],
+                               domain[fit_idx][val_idx])
 
-        # --- data loaders ---------------------------------------------
         loader_kwargs = dict(
             num_workers=cfg["num_workers"],
             pin_memory=torch.cuda.is_available(),
             persistent_workers=cfg["num_workers"] > 0,
         )
         loader_train = StratifiedDomainDataLoader(
-            ds_train,
-            cfg["batch_size_train"],
-            domains_per_batch=domains_per_batch,
-            shuffle=True,
-            drop_last=False,
-            **loader_kwargs,
+            ds_train, cfg["batch_size_train"], domains_per_batch=domains_per_batch,
+            shuffle=True, drop_last=False, **loader_kwargs,
         )
         loader_val = torch.utils.data.DataLoader(
             ds_val, batch_size=len(ds_val), **loader_kwargs
         )
 
-        # --- model (DataParallel if multi-GPU) ------------------------
-        model = HEEGNet(
-            device=device, dtype=cfg["dtype"], **mdl_kwargs
-        ).to(device=device, dtype=cfg["dtype"])
-
-        if len(gpu_ids) > 1:
-            model = torch.nn.DataParallel(
-                model, device_ids=gpu_ids, output_device=gpu_ids[0]
-            )
-
-        # --- callbacks ------------------------------------------------
-        es = EarlyStopping(
-            metric="val_loss",
-            higher_is_better=False,
-            patience=20,
-            verbose=False,
+        model = HEEGNet(device=device, dtype=cfg["dtype"], **mdl_kwargs).to(
+            device=device, dtype=cfg["dtype"]
         )
+        if len(gpu_ids) > 1:
+            model = torch.nn.DataParallel(model, device_ids=gpu_ids,
+                                          output_device=gpu_ids[0])
+
+        es = EarlyStopping(metric="val_loss", higher_is_better=False,
+                           patience=20, verbose=False)
         bn_sched = MomentumBatchNormScheduler(
-            epochs=cfg["epochs"] - 10,
+            epochs=cfg["bn_sched_epochs"],
             bs0=cfg["batch_size_train"],
             bs=cfg["batch_size_train"] / domains_per_batch,
             tau0=0.85,
         )
-
-        # --- trainer --------------------------------------------------
-        trainer = Trainer(
-            max_epochs=cfg["epochs"],
-            min_epochs=cfg["min_epochs"],
-            callbacks=[es, bn_sched],
-            loss=torch.nn.CrossEntropyLoss(),
-            device=device,
-            dtype=cfg["dtype"],
-            swd_weight=cfg["swd_weight"],
-            lr=cfg["lr"],
+        trainer = FastTrainer(
+            train_eval_every=TRAIN_EVAL_EVERY,
+            max_epochs=cfg["epochs"], min_epochs=cfg["min_epochs"],
+            callbacks=[es, bn_sched], loss=torch.nn.CrossEntropyLoss(),
+            device=device, dtype=cfg["dtype"],
+            swd_weight=cfg["swd_weight"], lr=cfg["lr"],
         )
 
-        # --- fit ------------------------------------------------------
         trainer.fit(model, train_dataloader=loader_train, val_dataloader=loader_val)
-        print(f"  Early-stopping best epoch: {es.best_epoch}")
+        print(f"  Early-stopping best epoch: {es.best_epoch} (max {cfg['epochs']})")
 
-        # unwrap DataParallel for SFUDA
-        sfuda_net = deepcopy(
-            model.module if isinstance(model, torch.nn.DataParallel) else model
-        )
+        base_model = model.module if isinstance(model, torch.nn.DataParallel) else model
 
-        # --- evaluation per test domain -------------------------------
-        test_domains = domain[test_idx].unique()
-        for td in test_domains:
+        for td in domain[test_idx].unique():
             mask = domain[test_idx] == td
-            ds_test = DomainDataset(
-                X[test_idx][mask],
-                y[test_idx][mask],
-                domain[test_idx][mask],
-            )
-            loader_test = torch.utils.data.DataLoader(
-                ds_test, batch_size=len(ds_test)
-            )
+            ds_test = DomainDataset(X[test_idx][mask], y[test_idx][mask],
+                                    domain[test_idx][mask])
+            loader_test = torch.utils.data.DataLoader(ds_test, batch_size=len(ds_test))
 
-            # source-free domain adaptation
-            sfuda_offline(ds_test, sfuda_net)
+            # (a) no adaptation
+            res_plain = trainer.test(base_model, dataloader=loader_test)
 
-            res = trainer.test(sfuda_net, dataloader=loader_test)
-            print(
-                f"    domain {td.item():3d} | "
-                f"loss={res['loss']:.4f}  bal_acc={res['score']:.4f}"
-            )
-            records.append(
-                dict(
-                    dataset="things_eeg2",
-                    fold=ix_fold,
-                    test_subject=int(test_subs[0]) if len(test_subs) == 1 else test_subs.tolist(),
-                    domain=td.item(),
-                    **res,
-                )
-            )
+            # (b) with SFUDA (on a copy, with dummy labels)
+            if USE_SFUDA:
+                sfuda_net = deepcopy(base_model)
+                sfuda_offline(ds_test, sfuda_net)
+                res_sfuda = trainer.test(sfuda_net, dataloader=loader_test)
+            else:
+                res_sfuda = dict(loss=float("nan"), score=float("nan"))
 
+            print(f"    domain {td.item():3d} | plain: loss={res_plain['loss']:.4f} "
+                  f"acc={res_plain['score']:.4f} | SFUDA: loss={res_sfuda['loss']:.4f} "
+                  f"acc={res_sfuda['score']:.4f}")
+
+            records.append(dict(
+                dataset="things_eeg2", fold=ix_fold,
+                test_subject=int(test_subs[0]) if len(test_subs) == 1 else test_subs.tolist(),
+                domain=int(td.item()), best_epoch=int(es.best_epoch),
+                loss_plain=float(res_plain["loss"]), score_plain=float(res_plain["score"]),
+                loss_sfuda=float(res_sfuda["loss"]), score_sfuda=float(res_sfuda["score"]),
+            ))
         print()
 
-    # ------------------------------------------------------------------
     # 5. Summary
-    # ------------------------------------------------------------------
     print("[4/4] Results summary\n")
     resdf = pd.DataFrame(records)
     print(resdf.to_string(index=False))
     print()
-    summary = resdf.groupby("dataset")[["loss", "score"]].agg(["mean", "std"]).round(4)
-    print(summary)
-    print()
+    cols = ["loss_plain", "score_plain", "loss_sfuda", "score_sfuda"]
+    print(resdf.groupby("test_subject")[cols].agg(["mean", "std"]).round(4))
+    print(f"\nChance accuracy = {1 / N_CLASSES:.4f}, chance loss = {np.log(N_CLASSES):.3f}")
 
-    # Per-subject summary
-    if "test_subject" in resdf.columns:
-        per_sub = resdf.groupby("test_subject")[["loss", "score"]].agg(["mean", "std"]).round(4)
-        print("Per-subject results:")
-        print(per_sub)
-        print()
-
-    # Save
-    out_path = os.path.join(BASE_DIR, "cv_results_things_eeg2.json")
+    out_path = os.path.join(BASE_DIR, f"cv_results_things_eeg2_{RUN_TAG}.json")
     with open(out_path, "w") as f:
         json.dump(records, f, indent=2)
     print(f"Results saved to {out_path}")

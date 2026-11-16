@@ -1,0 +1,62 @@
+{
+  "dataset": "THINGS-EEG2 (Test partition: 200 concepts x 80 reps)",
+  "n_subjects": 10,
+  "n_channels": 63,
+  "sampling_rate_hz": 100,
+  "grand_average_p100": {
+    "latency_ms": 74.0,
+    "amplitude_uv": 0.22290000000000001
+  },
+  "grand_average_n170": {
+    "latency_ms": 194.0,
+    "amplitude_uv": -0.13199999999999998
+  },
+  "grand_average_p300": {
+    "latency_ms": 364.0,
+    "amplitude_uv": 0.1278
+  },
+  "evoked_snr_ranking": [
+    {
+      "subject": 8,
+      "evoked_snr_x1000": 46.65
+    },
+    {
+      "subject": 3,
+      "evoked_snr_x1000": 42.76
+    },
+    {
+      "subject": 10,
+      "evoked_snr_x1000": 36.56
+    },
+    {
+      "subject": 4,
+      "evoked_snr_x1000": 36.28
+    },
+    {
+      "subject": 2,
+      "evoked_snr_x1000": 35.22
+    },
+    {
+      "subject": 7,
+      "evoked_snr_x1000": 33.09
+    },
+    {
+      "subject": 1,
+      "evoked_snr_x1000": 31.48
+    },
+    {
+      "subject": 5,
+      "evoked_snr_x1000": 22.04
+    },
+    {
+      "subject": 6,
+      "evoked_snr_x1000": 17.96
+    },
+    {
+      "subject": 9,
+      "evoked_snr_x1000": 10.65
+    }
+  ],
+  "alpha_erd_percent": -36.667,
+  "elapsed_seconds": 140.7
+}

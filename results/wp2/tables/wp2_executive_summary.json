@@ -1,0 +1,178 @@
+{
+  "n_concepts": 200,
+  "n_reference_rdms": 13,
+  "reference_rdm_keys": [
+    "visual_pixel",
+    "visual_color",
+    "visual_spatial_freq",
+    "visual_early_conv1",
+    "visual_early_layer1",
+    "visual_low_level_composite",
+    "visual_deep_layer4",
+    "visual_deep_avgpool",
+    "semantic_names",
+    "semantic_definitions",
+    "hierarchy_wup",
+    "hierarchy_path",
+    "hierarchy_lin"
+  ],
+  "brain_model_alignment": [
+    {
+      "model": "visual_low_level_composite",
+      "mean_pearson_r": 0.09836246371269226,
+      "std_pearson_r": 0.020060301391538964,
+      "ci95_low": 0.08592896009513744,
+      "ci95_high": 0.11079596733024709,
+      "dev_mean_r": 0.08665241897106171,
+      "confirmation_mean_r": 0.11007250845432281,
+      "t_stat_vs_zero": 14.71001782966924,
+      "p_val_vs_zero": 1.336382720958446e-07
+    },
+    {
+      "model": "visual_deep_avgpool",
+      "mean_pearson_r": 0.09440566897392273,
+      "std_pearson_r": 0.019239508699432223,
+      "ci95_low": 0.0824808979375681,
+      "ci95_high": 0.10633044001027736,
+      "dev_mean_r": 0.08544890433549882,
+      "confirmation_mean_r": 0.10336243361234665,
+      "t_stat_vs_zero": 14.720594550843504,
+      "p_val_vs_zero": 1.3280776148537067e-07
+    },
+    {
+      "model": "visual_deep_layer4",
+      "mean_pearson_r": 0.09440566897392273,
+      "std_pearson_r": 0.019239508699432223,
+      "ci95_low": 0.0824808979375681,
+      "ci95_high": 0.10633044001027736,
+      "dev_mean_r": 0.08544890433549882,
+      "confirmation_mean_r": 0.10336243361234665,
+      "t_stat_vs_zero": 14.720594550843504,
+      "p_val_vs_zero": 1.3280776148537067e-07
+    },
+    {
+      "model": "visual_color",
+      "mean_pearson_r": 0.0911465898156166,
+      "std_pearson_r": 0.026604667634463133,
+      "ci95_low": 0.07465684597674978,
+      "ci95_high": 0.10763633365448343,
+      "dev_mean_r": 0.07821546792984009,
+      "confirmation_mean_r": 0.10407771170139313,
+      "t_stat_vs_zero": 10.2778870686827,
+      "p_val_vs_zero": 2.8469941072953912e-06
+    },
+    {
+      "model": "semantic_definitions",
+      "mean_pearson_r": 0.07421180568635463,
+      "std_pearson_r": 0.010343853848589438,
+      "ci95_low": 0.06780061864904818,
+      "ci95_high": 0.08062299272366108,
+      "dev_mean_r": 0.07068367302417755,
+      "confirmation_mean_r": 0.07773993834853173,
+      "t_stat_vs_zero": 21.523449607655085,
+      "p_val_vs_zero": 4.747600087691438e-09
+    },
+    {
+      "model": "visual_pixel",
+      "mean_pearson_r": 0.06766813471913338,
+      "std_pearson_r": 0.014475547732409446,
+      "ci95_low": 0.058696097281405096,
+      "ci95_high": 0.07664017215686167,
+      "dev_mean_r": 0.06868144422769547,
+      "confirmation_mean_r": 0.06665482521057128,
+      "t_stat_vs_zero": 14.02395321476448,
+      "p_val_vs_zero": 2.020757894824568e-07
+    },
+    {
+      "model": "semantic_names",
+      "mean_pearson_r": 0.043559199385344985,
+      "std_pearson_r": 0.02113270799523739,
+      "ci95_low": 0.03046101126847361,
+      "ci95_high": 0.056657387502216355,
+      "dev_mean_r": 0.04466503337025642,
+      "confirmation_mean_r": 0.04245336540043354,
+      "t_stat_vs_zero": 6.183665538060022,
+      "p_val_vs_zero": 0.00016201460439425704
+    },
+    {
+      "model": "visual_early_conv1",
+      "mean_pearson_r": 0.031634434778243306,
+      "std_pearson_r": 0.014726670449249975,
+      "ci95_low": 0.022506749868059603,
+      "ci95_high": 0.04076211968842701,
+      "dev_mean_r": 0.02974041048437357,
+      "confirmation_mean_r": 0.033528459072113034,
+      "t_stat_vs_zero": 6.444315071881255,
+      "p_val_vs_zero": 0.00011892967229130655
+    },
+    {
+      "model": "visual_spatial_freq",
+      "mean_pearson_r": 0.016953653004020453,
+      "std_pearson_r": 0.03132608572034396,
+      "ci95_low": -0.0024624560825563663,
+      "ci95_high": 0.03636976209059727,
+      "dev_mean_r": 0.0022838449105620382,
+      "confirmation_mean_r": 0.031623461097478864,
+      "t_stat_vs_zero": 1.6235976453014347,
+      "p_val_vs_zero": 0.13890931725930178
+    },
+    {
+      "model": "hierarchy_path",
+      "mean_pearson_r": 0.007703441893681884,
+      "std_pearson_r": 0.02264579439889265,
+      "ci95_low": -0.006332566892297463,
+      "ci95_high": 0.02173945067966123,
+      "dev_mean_r": 0.00013768533244729042,
+      "confirmation_mean_r": 0.015269198454916477,
+      "t_stat_vs_zero": 1.0205129161720075,
+      "p_val_vs_zero": 0.33413239236863224
+    },
+    {
+      "model": "hierarchy_lin",
+      "mean_pearson_r": -0.023218546545831487,
+      "std_pearson_r": 0.01714536159385687,
+      "ci95_low": -0.033845351758808935,
+      "ci95_high": -0.012591741332854038,
+      "dev_mean_r": -0.02017579119419679,
+      "confirmation_mean_r": -0.026261301897466182,
+      "t_stat_vs_zero": -4.062652120585888,
+      "p_val_vs_zero": 0.002830662534366132
+    },
+    {
+      "model": "hierarchy_wup",
+      "mean_pearson_r": -0.030841527850134297,
+      "std_pearson_r": 0.02359524962807127,
+      "ci95_low": -0.04546601508398372,
+      "ci95_high": -0.016217040616284872,
+      "dev_mean_r": -0.023447093600407243,
+      "confirmation_mean_r": -0.038235962099861354,
+      "t_stat_vs_zero": -3.921322512321564,
+      "p_val_vs_zero": 0.00350392139319638
+    }
+  ],
+  "key_inter_model_correlations": {
+    "semantic_vs_hierarchy_wup": 0.08312566578388214,
+    "deep_visual_vs_semantic": 0.17328371107578278,
+    "deep_visual_vs_hierarchy": 0.18322746455669403,
+    "low_level_vs_deep_visual": 0.16330432891845703
+  },
+  "time_resolved_peaks": {
+    "Low-Level Visual": {
+      "peak_r": 0.09511715918779373,
+      "peak_time_ms": 69.99999999999999
+    },
+    "Deep Visual (ResNet-50)": {
+      "peak_r": 0.18348640203475952,
+      "peak_time_ms": 379.99999999999994
+    },
+    "Semantic (MiniLM)": {
+      "peak_r": 0.0658586248755455,
+      "peak_time_ms": 300.0
+    },
+    "Hierarchy (WordNet WUP)": {
+      "peak_r": 0.1509905606508255,
+      "peak_time_ms": 190.0
+    }
+  },
+  "elapsed_seconds": 86.74
+}

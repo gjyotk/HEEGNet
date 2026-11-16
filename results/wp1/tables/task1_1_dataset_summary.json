@@ -1,0 +1,27 @@
+{
+  "partition": "THINGS-EEG2 TEST ONLY",
+  "n_test_concepts": 200,
+  "n_test_images": 200,
+  "images_per_test_concept": 1,
+  "n_train_concepts": 1654,
+  "n_train_images": 16540,
+  "images_per_train_concept": 10,
+  "n_subjects": 10,
+  "n_sessions_per_subject": 4,
+  "reps_per_session": 20,
+  "total_reps": 80,
+  "dev_subjects": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "conf_subjects": [
+    6,
+    7,
+    8,
+    9,
+    10
+  ]
+}
