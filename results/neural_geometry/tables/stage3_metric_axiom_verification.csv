@@ -1,0 +1,4 @@
+distance_type,n_tested,n_violations,pct_violations,max_excess,is_valid_metric
+Correlation Distance (1 - r),98545,2,0.0020295296565021057,0.042319897386189576,False
+Angular Distance (arccos(r)/pi),98545,0,0.0,0.0,True
+Normalized Euclidean (||u - v||),98545,0,0.0,0.0,True
