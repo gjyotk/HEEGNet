@@ -24,10 +24,20 @@ Comprehensive Methodological Overhaul, Frozen Training Protocol, & Training Diag
 """
 
 import os
-os.environ["MPLCONFIGDIR"] = "/tmp/mpl_cache"
-
 import sys
+from pathlib import Path
+
+# Self-healing python interpreter resolution: ensure .venv python is used
+BASE_DIR_PATH = Path(__file__).resolve().parent
+VENV_PYTHON = BASE_DIR_PATH / ".venv/bin/python"
+if VENV_PYTHON.exists() and sys.executable != str(VENV_PYTHON):
+    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON)] + sys.argv)
+
+os.environ["MPLCONFIGDIR"] = "/tmp/mpl_cache"
+os.makedirs("/tmp/mpl_cache", exist_ok=True)
+
 import time
+import copy
 import json
 import zipfile
 import warnings
@@ -48,7 +58,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import TensorDataset, DataLoader
 
-BASE_DIR = Path("/usershome/cv13/projects/heeg-net/HEEGNet")
+BASE_DIR = Path(os.environ.get("HEEGNET_DIR", Path(__file__).resolve().parent))
 sys.path.insert(0, str(BASE_DIR))
 
 from nets.model import HEEGNet
@@ -386,11 +396,53 @@ def build_concept_category_mapping():
 # SECTION 4: MULTI-SUBJECT TRAINING & FROZEN PROTOCOL (CHANGE 1 & 2)
 # ==============================================================================
 
+def evaluate_pseudo_trial_scaling(raw_data: np.ndarray, labels: np.ndarray):
+    """
+    Evaluates empirical variance reduction and amplitude SNR scaling across
+    1, 2, 4, and 8 repetition pseudo-trials against theoretical predictions (Issue 4).
+    Corrects column names to distinguish variance reduction (N) from amplitude SNR (sqrt(N)).
+    """
+    print("\n" + "=" * 80)
+    print("PSEUDO-TRIAL REPETITION SCALING (VARIANCE REDUCTION VS AMPLITUDE SNR)")
+    print("=" * 80)
+    scaling_records = []
+    base_var = None
+    for n_avg in [1, 2, 4, 8]:
+        if n_avg == 1:
+            X_p = raw_data
+        else:
+            n_chunks = len(raw_data) // n_avg
+            X_p = raw_data[:n_chunks * n_avg].reshape(n_chunks, n_avg, *raw_data.shape[1:]).mean(axis=1)
+        
+        noise_var = float(np.var(X_p - np.mean(X_p, axis=0, keepdims=True)))
+        if base_var is None:
+            base_var = noise_var
+            
+        emp_var_red = float(base_var / (noise_var + 1e-8))
+        emp_snr_amp = float(np.sqrt(emp_var_red))
+        theo_var_red = float(n_avg)
+        theo_snr_amp = float(np.sqrt(n_avg))
+        
+        scaling_records.append({
+            "repetition_count": n_avg,
+            "n_pseudo_trials": len(X_p),
+            "empirical_noise_variance": round(noise_var, 4),
+            "theoretical_variance_reduction": theo_var_red,
+            "empirical_variance_reduction_ratio": round(emp_var_red, 3),
+            "theoretical_amplitude_snr_ratio": round(theo_snr_amp, 3),
+            "empirical_amplitude_snr_ratio": round(emp_snr_amp, 3)
+        })
+    df_pseudo = pd.DataFrame(scaling_records)
+    df_pseudo.to_csv(TABLES_DIR / "pseudo_trial_repetition_scaling.csv", index=False)
+    print(df_pseudo.to_string(index=False))
+    return df_pseudo
+
+
 def load_multi_subject_training_data(train_subs=[1, 2, 3], val_subs=[4, 5], test_subs=[6, 7, 8, 9, 10]):
     """
     Loads multi-subject training and validation cohorts adhering strictly to Change 1:
-    - Train: Sub-01, Sub-02, Sub-03 (1,654 concepts, 2 sessions per subject).
-    - Val: Sub-04, Sub-05 (1,654 concepts, explicit held-out subjects).
+    - Train: Sub-01, Sub-02, Sub-03 (1,654 concepts, all 4 sessions = 12 domains).
+    - Val: Sub-04, Sub-05 (1,654 concepts, explicit held-out subjects across all sessions).
     - Test: Sub-06 through Sub-10 (100% quarantined until final evaluation).
     - Saves 'frozen_training_protocol.json'.
     """
@@ -411,21 +463,23 @@ def load_multi_subject_training_data(train_subs=[1, 2, 3], val_subs=[4, 5], test
         raw = obj["preprocessed_eeg_data"]  # (16540, 4, 64, 100)
         n_images = raw.shape[0]
         concepts = np.arange(n_images) // 10
+        assert len(np.unique(concepts)) == 1654, f"Expected 1654 concepts, got {len(np.unique(concepts))}"
         
-        # 2 sessions per training subject = 6 domains
-        for s in [0, 1]:
+        # All 4 sessions per training subject = 12 domains (Change 1 & Point 3)
+        for s in range(4):
             s_trials = fn.euler_align(raw[:, s, :63, :].astype(np.float32))
             all_X_tr.append(s_trials)
             all_y_tr.append(concepts)
             all_d_tr.append(np.full(n_images, domain_counter, dtype=np.int64))
             domain_counter += 1
             
-    X_train = np.concatenate(all_X_tr, axis=0)  # (99240, 63, 100)
+    X_train = np.concatenate(all_X_tr, axis=0)  # (198480, 63, 100)
     y_train = np.concatenate(all_y_tr, axis=0)
     d_train = np.concatenate(all_d_tr, axis=0)
     
-    # Explicit validation subjects: Sub-04 and Sub-05
+    # Explicit validation subjects: Sub-04 and Sub-05 across all sessions
     all_X_val, all_y_val, all_d_val = [], [], []
+    val_dom_counter = 100
     for sub in val_subs:
         zip_path = PREPROCESSED_DIR / f"sub-{sub:02d}__63_channels.zip"
         print(f"Loading validation partition for Sub-{sub:02d} from {zip_path.name}...")
@@ -435,22 +489,24 @@ def load_multi_subject_training_data(train_subs=[1, 2, 3], val_subs=[4, 5], test
         v_raw = v_obj["preprocessed_eeg_data"]
         n_img = v_raw.shape[0]
         v_concepts = np.arange(n_img) // 10
-        v_trials = fn.euler_align(v_raw[:, 0, :63, :].astype(np.float32))
-        all_X_val.append(v_trials)
-        all_y_val.append(v_concepts)
-        all_d_val.append(np.full(n_img, 0, dtype=np.int64))
+        for s in range(4):
+            v_trials = fn.euler_align(v_raw[:, s, :63, :].astype(np.float32))
+            all_X_val.append(v_trials)
+            all_y_val.append(v_concepts)
+            all_d_val.append(np.full(n_img, val_dom_counter, dtype=np.int64))
+            val_dom_counter += 1
         
-    X_val_all = np.concatenate(all_X_val, axis=0)  # (33080, 63, 100)
+    X_val_all = np.concatenate(all_X_val, axis=0)  # (132320, 63, 100)
     y_val_all = np.concatenate(all_y_val, axis=0)
     d_val_all = np.concatenate(all_d_val, axis=0)
     
-    # High-precision validation subset (5,000 trials with fixed seed)
-    val_perm = np.random.RandomState(42).permutation(len(X_val_all))[:5000]
+    # High-precision validation subset (10,000 trials with fixed seed)
+    val_perm = np.random.RandomState(42).permutation(len(X_val_all))[:10000]
     X_val = X_val_all[val_perm]
     y_val = y_val_all[val_perm]
     d_val = d_val_all[val_perm]
     
-    print(f"Training Cohort: {X_train.shape[0]} trials across {train_subs} (1,654 classes, 6 domains).")
+    print(f"Training Cohort: {X_train.shape[0]} trials across {train_subs} (1,654 classes, {domain_counter} domains).")
     print(f"Validation Cohort: {X_val.shape[0]} trials across explicit validation subjects {val_subs}.")
     print(f"Test Cohort: {test_subs} (100% quarantined, 0% used in gradient updates or early stopping).")
     
@@ -482,7 +538,8 @@ def load_multi_subject_training_data(train_subs=[1, 2, 3], val_subs=[4, 5], test
             "D": 2,
             "latent_dimension": 48,
             "num_classes": 1654,
-            "optimizer": "Adam",
+            "optimizer_heegnet": "RiemannianAdam",
+            "optimizer_eegnet": "Adam",
             "lr": 0.005,
             "weight_decay": 1e-4,
             "batch_size": 512,
@@ -494,10 +551,13 @@ def load_multi_subject_training_data(train_subs=[1, 2, 3], val_subs=[4, 5], test
         json.dump(protocol, fp, indent=2)
     print(f"[Saved] Frozen Training Protocol -> {TABLES_DIR / 'frozen_training_protocol.json'}")
     
+    # Evaluate pseudo-trial scaling on Sub-01 single-session data
+    evaluate_pseudo_trial_scaling(X_train[:16540], y_train[:16540])
+    
     return X_train, y_train, d_train, X_val, y_val, d_val, domain_counter
 
 
-def train_matched_models(X_train, y_train, d_train, X_val, y_val, d_val, n_domains, n_epochs=6):
+def train_matched_models(X_train, y_train, d_train, X_val, y_val, d_val, n_domains, n_epochs=12):
     """
     Change 1 & 2: Trains matched HEEGNet and Euclidean EEGNet with strict sample parity,
     validation loss checkpoint selection, and comprehensive diagnostics:
@@ -633,7 +693,9 @@ def train_matched_models(X_train, y_train, d_train, X_val, y_val, d_val, n_domai
                 vbd = vbd.to(DEVICE)
                 b_len = len(vbx)
                 
-                p_hyp, _ = model_hyp(vbx, vbd)
+                # Validate using learned source-domain BN statistics (calibrated transfer)
+                vbd_src = torch.zeros(len(vbx), dtype=torch.long, device=DEVICE)
+                p_hyp, _ = model_hyp(vbx, vbd_src)
                 p_euc, _ = model_euc(vbx)
                 
                 v_loss_h_sum += criterion(p_hyp, vby).item() * b_len
@@ -852,32 +914,134 @@ def plot_training_diagnostics(df_h, conf_hyp, cat_names, best_ep_hyp, best_ep_eu
 # SECTION 5: INTRINSIC RIEMANNIAN FRÉCHET CENTROIDS & EXTRACTION (ISSUES D & E)
 # ==============================================================================
 
-def compute_lorentz_frechet_mean(pts, manifold, n_iter=15):
+def compute_lorentz_frechet_mean(pts, manifold, tol=1e-5, max_iter=30):
     """
     Computes the true Riemannian Fréchet / Karcher mean on the Lorentz hyperboloid
-    via iterative Riemannian gradient descent using log/exp maps.
+    via iterative Riemannian gradient descent using log/exp maps with tolerance convergence.
     pts: (N, 49) tensor on the hyperboloid.
     """
     mu = pts.mean(dim=0, keepdim=True)
     mu = manifold.projx(mu)
-    for _ in range(n_iter):
+    for _ in range(max_iter):
         u = manifold.logmap(mu, pts)
         v = u.mean(dim=0, keepdim=True)
         v_norm = manifold.norm(v)
-        if v_norm.item() < 1e-5:
+        if v_norm.item() < tol:
             break
         mu = manifold.expmap(mu, v)
     return mu.squeeze(0)
 
 
-def extract_subject_level_rdms(model_hyp, model_euc, heldout_subs=[6, 7, 8, 9, 10]):
+def build_mantel_permutation_table(n=200, n_permutations=10000, seed=42):
+    """Pre-generates flat index lookups for ultra-fast vectorized Mantel tests."""
+    np.random.seed(seed)
+    iu = np.triu_indices(n, k=1)
+    m = len(iu[0])
+    perm_table = np.empty((n_permutations, m), dtype=np.int32)
+    for i in range(n_permutations):
+        p = np.random.permutation(n)
+        pi, pj = p[iu[0]], p[iu[1]]
+        swap = pi > pj
+        pi[swap], pj[swap] = pj[swap], pi[swap]
+        perm_table[i] = pi * n + pj
+    return perm_table
+
+
+def fast_mantel_test(rdm1, rdm2, perm_table):
+    """
+    Vectorized concept-permutation Mantel test executing 10,000 concept permutations in <0.05s.
+    """
+    n = rdm1.shape[0]
+    iu = np.triu_indices(n, k=1)
+    m = len(iu[0])
+    n_permutations = perm_table.shape[0]
+    
+    # Rank transform upper triangles
+    ranks1 = stats.rankdata(rdm1).reshape(n, n)
+    flat_ranks1 = ranks1.ravel()
+    
+    v2 = stats.rankdata(rdm2[iu])
+    v2_norm = (v2 - v2.mean()) / (v2.std() + 1e-8)
+    
+    # Observed correlation
+    v1_obs = flat_ranks1[iu[0] * n + iu[1]]
+    v1_norm = (v1_obs - v1_obs.mean()) / (v1_obs.std() + 1e-8)
+    r_obs = float(np.dot(v1_norm, v2_norm) / m)
+    
+    # Permutation correlations
+    perm_v1 = flat_ranks1[perm_table]  # (n_permutations, m)
+    perm_v1 = (perm_v1 - perm_v1.mean(axis=1, keepdims=True)) / (perm_v1.std(axis=1, keepdims=True) + 1e-8)
+    perm_rs = np.dot(perm_v1, v2_norm) / m
+    
+    n_greater = np.sum(perm_rs >= r_obs)
+    p_val = float((n_greater + 1.0) / (n_permutations + 1.0))
+    p_exact_str = f"p < {1.0/(n_permutations+1.0):.4f}" if n_greater == 0 else f"p = {p_val:.4f}"
+    return r_obs, p_val, p_exact_str
+
+
+def compute_gromov_hyperbolicity_common_metric(D, n_quadruplets=50000, n_boot=200, seed=42):
+    """
+    Computes Gromov delta-hyperbolicity on a common normalized metric (scaled to median pairwise distance = 1.0)
+    with 95% bootstrap confidence intervals across quadruplets (Issue 7).
+    """
+    np.random.seed(seed)
+    n = D.shape[0]
+    iu = np.triu_indices(n, k=1)
+    median_d = float(np.median(D[iu]))
+    if median_d <= 0:
+        median_d = 1.0
+    D_norm = D / median_d
+    
+    quads = np.random.randint(0, n, size=(n_quadruplets, 4))
+    mask = (quads[:, 0] != quads[:, 1]) & (quads[:, 0] != quads[:, 2]) & (quads[:, 0] != quads[:, 3]) & \
+           (quads[:, 1] != quads[:, 2]) & (quads[:, 1] != quads[:, 3]) & (quads[:, 2] != quads[:, 3])
+    quads = quads[mask]
+    
+    x, y, z, w = quads[:, 0], quads[:, 1], quads[:, 2], quads[:, 3]
+    s1 = D_norm[x, y] + D_norm[z, w]
+    s2 = D_norm[x, z] + D_norm[y, w]
+    s3 = D_norm[x, w] + D_norm[y, z]
+    
+    sums = np.column_stack([s1, s2, s3])
+    sums.sort(axis=1)
+    deltas = (sums[:, 2] - sums[:, 1]) / 2.0
+    
+    boot_means = []
+    n_sample = len(deltas)
+    for _ in range(n_boot):
+        b_idx = np.random.randint(0, n_sample, size=min(n_sample, 5000))
+        boot_means.append(float(np.mean(deltas[b_idx])))
+        
+    ci_low = float(np.percentile(boot_means, 2.5))
+    ci_high = float(np.percentile(boot_means, 97.5))
+    
+    return {
+        "norm_mean_delta": float(deltas.mean()),
+        "norm_p95_delta": float(np.percentile(deltas, 95)),
+        "norm_max_delta": float(deltas.max()),
+        "ci95_low": ci_low,
+        "ci95_high": ci_high
+    }
+
+
+def extract_subject_level_rdms(model_hyp, model_euc, heldout_subs=[6, 7, 8, 9, 10], n_train_domains=12):
     print("\n" + "=" * 80)
-    print("PHASE 3: SUBJECT-LEVEL HELD-OUT EXTRACTION (CRITICAL B FIX & FRÉCHET CENTROIDS)")
+    print("PHASE 3: SUBJECT-LEVEL HELD-OUT EXTRACTION (PLAIN VS ADAPTED & UNTRAINED CONTROLS)")
     print("=" * 80)
     
     manifold = CustomLorentz()
     model_hyp.eval()
     model_euc.eval()
+    
+    # Untrained controls as rigorous negative baselines
+    torch.manual_seed(42)
+    untrained_hyp = HEEGNet(chunk_size=100, num_electrodes=63, num_classes=1654,
+                            domains=torch.arange(n_train_domains), device=DEVICE,
+                            dtype=torch.float32, domain_adaptation=True).to(DEVICE)
+    untrained_hyp.eval()
+    
+    untrained_euc = EuclideanEEGNet(chunk_size=100, num_electrodes=63, num_classes=1654).to(DEVICE)
+    untrained_euc.eval()
     
     subject_rdms = {}
     
@@ -893,34 +1057,70 @@ def extract_subject_level_rdms(model_hyp, model_euc, heldout_subs=[6, 7, 8, 9, 1
         
         # Principled domain handling: Euler align per session (4 sessions of 20 reps)
         sub_trials = []
+        sub_domains = []
         for s in range(4):
             s_data = test_raw[:, s*20 : (s+1)*20, :, :].transpose(0, 1, 2, 3).reshape(-1, n_ch, n_times).astype(np.float32)
-            sub_trials.append(fn.euler_align(s_data))
+            aligned = fn.euler_align(s_data)
+            sub_trials.append(aligned)
+            target_domain_id = 100 + sub * 4 + s
+            sub_domains.append(np.full(len(aligned), target_domain_id, dtype=np.int64))
+            
         X_sub = np.concatenate(sub_trials, axis=0)  # (16000, 63, 100)
+        D_sub = np.concatenate(sub_domains, axis=0)  # (16000,)
         
-        # Extract features batchwise
-        all_feats_hyp = []
-        all_feats_euc = []
+        # 1. Plain HEEGNet (Source domain BN statistics, no adaptation)
+        all_f_plain = []
+        all_f_euc = []
+        all_f_untrained_hyp = []
+        all_f_untrained_euc = []
         batch_size = 512
         with torch.no_grad():
             for b in range(0, len(X_sub), batch_size):
                 b_end = min(b + batch_size, len(X_sub))
                 bx = torch.tensor(X_sub[b:b_end], dtype=torch.float32, device=DEVICE)
-                bd = torch.zeros(len(bx), dtype=torch.long, device=DEVICE)
+                bd_src = torch.zeros(len(bx), dtype=torch.long, device=DEVICE)
                 
-                _, f_hyp = model_hyp(bx, bd)
-                all_feats_hyp.append(manifold.projx(f_hyp).cpu())
+                _, f_p = model_hyp(bx, bd_src)
+                all_f_plain.append(manifold.projx(f_p).cpu())
                 
-                _, f_euc = model_euc(bx)
-                all_feats_euc.append(f_euc.cpu())
+                _, f_e = model_euc(bx)
+                all_f_euc.append(f_e.cpu())
                 
-        feats_hyp = torch.cat(all_feats_hyp, dim=0)  # (16000, 49)
-        feats_euc = torch.cat(all_feats_euc, dim=0).numpy()  # (16000, 48)
+                _, f_uh = untrained_hyp(bx, bd_src)
+                all_f_untrained_hyp.append(manifold.projx(f_uh).cpu())
+                
+                _, f_ue = untrained_euc(bx)
+                all_f_untrained_euc.append(f_ue.cpu())
+                
+        feats_hyp_plain = torch.cat(all_f_plain, dim=0)
+        feats_euc = torch.cat(all_f_euc, dim=0).numpy()
+        feats_untrained_hyp = torch.cat(all_f_untrained_hyp, dim=0)
+        feats_untrained_euc = torch.cat(all_f_untrained_euc, dim=0).numpy()
         
-        # Concept centroids across 80 repetitions
-        centroids_frechet = torch.zeros((n_concepts, 49), dtype=torch.float32)
+        # 2. Adapted HEEGNet (Unlabeled target-domain BN recalibration / SFUDA REFIT)
+        model_hyp_adapted = copy.deepcopy(model_hyp)
+        X_sub_t = torch.tensor(X_sub, dtype=torch.float32, device=DEVICE)
+        D_sub_t = torch.tensor(D_sub, dtype=torch.long, device=DEVICE)
+        model_hyp_adapted.domainadapt_finetune(X_sub_t, d=D_sub_t)
+        model_hyp_adapted.eval()
+        
+        all_f_adapted = []
+        with torch.no_grad():
+            for b in range(0, len(X_sub), batch_size):
+                b_end = min(b + batch_size, len(X_sub))
+                bx = torch.tensor(X_sub[b:b_end], dtype=torch.float32, device=DEVICE)
+                bd_tgt = torch.tensor(D_sub[b:b_end], dtype=torch.long, device=DEVICE)
+                _, f_a = model_hyp_adapted(bx, bd_tgt)
+                all_f_adapted.append(manifold.projx(f_a).cpu())
+        feats_hyp_adapted = torch.cat(all_f_adapted, dim=0)
+        
+        # Compute concept centroids across 80 repetitions
+        centroids_frechet_plain = torch.zeros((n_concepts, 49), dtype=torch.float32)
+        centroids_frechet_adapted = torch.zeros((n_concepts, 49), dtype=torch.float32)
         centroids_hyp_euc = np.zeros((n_concepts, 49), dtype=np.float32)
         centroids_euc = np.zeros((n_concepts, 48), dtype=np.float32)
+        centroids_frechet_untrained = torch.zeros((n_concepts, 49), dtype=torch.float32)
+        centroids_untrained_euc = np.zeros((n_concepts, 48), dtype=np.float32)
         
         rep_indices_per_concept = [[] for _ in range(n_concepts)]
         idx = 0
@@ -932,29 +1132,43 @@ def extract_subject_level_rdms(model_hyp, model_euc, heldout_subs=[6, 7, 8, 9, 1
                     
         for c in range(n_concepts):
             c_idx = rep_indices_per_concept[c]
-            c_pts_hyp = feats_hyp[c_idx]
-            centroids_frechet[c] = compute_lorentz_frechet_mean(c_pts_hyp, manifold)
-            centroids_hyp_euc[c] = c_pts_hyp.mean(dim=0).numpy()
+            
+            c_pts_plain = feats_hyp_plain[c_idx]
+            centroids_frechet_plain[c] = compute_lorentz_frechet_mean(c_pts_plain, manifold)
+            
+            c_pts_adapt = feats_hyp_adapted[c_idx]
+            centroids_frechet_adapted[c] = compute_lorentz_frechet_mean(c_pts_adapt, manifold)
+            centroids_hyp_euc[c] = c_pts_adapt.mean(dim=0).numpy()
+            
             centroids_euc[c] = feats_euc[c_idx].mean(axis=0)
             
+            c_pts_uh = feats_untrained_hyp[c_idx]
+            centroids_frechet_untrained[c] = compute_lorentz_frechet_mean(c_pts_uh, manifold)
+            centroids_untrained_euc[c] = feats_untrained_euc[c_idx].mean(axis=0)
+            
+        def lorentz_rdm(cent):
+            inner = - cent[:, :1] @ cent[:, :1].T + cent[:, 1:] @ cent[:, 1:].T
+            rdm = torch.acosh(torch.clamp(-inner, min=1.0 + 1e-7)).numpy()
+            np.fill_diagonal(rdm, 0.0)
+            return rdm
+            
         # Pairwise distance matrices for this held-out subject
-        # 1. HEEGNet Lorentz Geodesic (via Riemannian Fréchet centroids)
-        inner = - centroids_frechet[:, :1] @ centroids_frechet[:, :1].T + centroids_frechet[:, 1:] @ centroids_frechet[:, 1:].T
-        rdm_heeg_lor = torch.acosh(torch.clamp(-inner, min=1.0 + 1e-7)).numpy()
-        np.fill_diagonal(rdm_heeg_lor, 0.0)
-        
-        # 2. HEEGNet Euclidean (on same features)
+        rdm_plain = lorentz_rdm(centroids_frechet_plain)
+        rdm_adapted = lorentz_rdm(centroids_frechet_adapted)
         rdm_heeg_euc = squareform(pdist(centroids_hyp_euc, metric="euclidean"))
-        
-        # 3. Matched Euclidean EEGNet Model
         rdm_eeg_euc = squareform(pdist(centroids_euc, metric="euclidean"))
+        rdm_untrained_hyp = lorentz_rdm(centroids_frechet_untrained)
+        rdm_untrained_euc = squareform(pdist(centroids_untrained_euc, metric="euclidean"))
         
         subject_rdms[f"sub{sub:02d}"] = {
-            "heegnet_lorentz": rdm_heeg_lor,
+            "heegnet_lorentz_plain": rdm_plain,
+            "heegnet_lorentz_adapted": rdm_adapted,
             "heegnet_euclidean_feat": rdm_heeg_euc,
-            "eegnet_euclidean_model": rdm_eeg_euc
+            "eegnet_euclidean_model": rdm_eeg_euc,
+            "untrained_heegnet_lorentz": rdm_untrained_hyp,
+            "untrained_eegnet_euclidean": rdm_untrained_euc
         }
-        print(f"  Sub-{sub:02d} RDMs computed successfully.")
+        print(f"  Sub-{sub:02d} RDMs computed successfully (Plain, Adapted, EEGNet, Untrained Controls).")
         
     np.savez_compressed(RDMS_DIR / "heldout_subject_rdms.npz", **{
         f"{k}_{sub}": rdm
@@ -965,33 +1179,9 @@ def extract_subject_level_rdms(model_hyp, model_euc, heldout_subs=[6, 7, 8, 9, 1
     return subject_rdms
 
 
-# ==============================================================================
-# SECTION 6: STATISTICAL EVALUATION & MANTEL PERMUTATION TESTS (ISSUE 5)
-# ==============================================================================
-
-def mantel_test(rdm1, rdm2, n_permutations=1000, seed=42):
-    """
-    Non-parametric Mantel test permuting the 200 concept labels
-    to test matrix correlation without assuming independent pairs.
-    """
-    np.random.seed(seed)
-    iu = np.triu_indices(200, k=1)
-    v1 = rdm1[iu]
-    v2 = rdm2[iu]
-    r_obs, _ = stats.spearmanr(v1, v2)
-    
-    perm_rs = np.zeros(n_permutations)
-    for p in range(n_permutations):
-        perm_idx = np.random.permutation(200)
-        p_rdm1 = rdm1[np.ix_(perm_idx, perm_idx)]
-        perm_rs[p], _ = stats.spearmanr(p_rdm1[iu], v2)
-        
-    p_val = (np.sum(perm_rs >= r_obs) + 1.0) / (n_permutations + 1.0)
-    return float(r_obs), float(p_val)
-
 def run_statistical_evaluation(subject_rdms, heldout_subs=[6, 7, 8, 9, 10]):
     print("\n" + "=" * 80)
-    print("PHASE 4: RIGOROUS SUBJECT-LEVEL STATISTICAL EVALUATION (N=5 HELD-OUT BRAINS)")
+    print("PHASE 4: RIGOROUS SUBJECT-LEVEL STATISTICAL EVALUATION (N=5 HELD-OUT BRAINS, 10,000 PERMUTATIONS)")
     print("=" * 80)
     
     neural_data = np.load(STAGE2_RDM_PATH)
@@ -1007,7 +1197,9 @@ def run_statistical_evaluation(subject_rdms, heldout_subs=[6, 7, 8, 9, 10]):
         "Semantic Language (MiniLM)": lambda s: ref_data["semantic_names"]
     }
     
-    iu = np.triu_indices(200, k=1)
+    # Pre-generate 10,000 concept permutations for fast vectorized Mantel tests
+    perm_table = build_mantel_permutation_table(n=200, n_permutations=10000, seed=42)
+    
     eval_records = []
     
     for sub in heldout_subs:
@@ -1017,18 +1209,27 @@ def run_statistical_evaluation(subject_rdms, heldout_subs=[6, 7, 8, 9, 10]):
         for t_name, t_fn in targets.items():
             t_rdm = t_fn(sub)
             
-            # 1. HEEGNet Lorentz
-            r_lor, p_lor = mantel_test(s_dict["heegnet_lorentz"], t_rdm, n_permutations=1000)
-            # 2. HEEGNet Euclidean Feature
-            r_heuc, p_heuc = mantel_test(s_dict["heegnet_euclidean_feat"], t_rdm, n_permutations=1000)
+            # 1. HEEGNet Adapted
+            r_adapt, p_adapt, p_adapt_str = fast_mantel_test(s_dict["heegnet_lorentz_adapted"], t_rdm, perm_table)
+            # 2. HEEGNet Plain
+            r_plain, p_plain, p_plain_str = fast_mantel_test(s_dict["heegnet_lorentz_plain"], t_rdm, perm_table)
             # 3. Euclidean EEGNet Model
-            r_meuc, p_meuc = mantel_test(s_dict["eegnet_euclidean_model"], t_rdm, n_permutations=1000)
+            r_euc, p_euc, p_euc_str = fast_mantel_test(s_dict["eegnet_euclidean_model"], t_rdm, perm_table)
+            # 4. HEEGNet Euclidean Feature
+            r_feuc, p_feuc, p_feuc_str = fast_mantel_test(s_dict["heegnet_euclidean_feat"], t_rdm, perm_table)
+            # 5. Untrained HEEGNet
+            r_uh, p_uh, _ = fast_mantel_test(s_dict["untrained_heegnet_lorentz"], t_rdm, perm_table)
+            # 6. Untrained EEGNet
+            r_ue, p_ue, _ = fast_mantel_test(s_dict["untrained_eegnet_euclidean"], t_rdm, perm_table)
             
             eval_records.append({
                 "subject": s_key, "target": t_name,
-                "rho_heegnet_lorentz": r_lor, "p_mantel_lorentz": p_lor,
-                "rho_heegnet_euc_feat": r_heuc, "p_mantel_euc_feat": p_heuc,
-                "rho_eegnet_euc_model": r_meuc, "p_mantel_euc_model": p_meuc
+                "rho_heegnet_adapted": r_adapt, "p_mantel_adapted": p_adapt, "p_str_adapted": p_adapt_str,
+                "rho_heegnet_plain": r_plain, "p_mantel_plain": p_plain, "p_str_plain": p_plain_str,
+                "rho_eegnet_euc_model": r_euc, "p_mantel_euc_model": p_euc,
+                "rho_heegnet_euc_feat": r_feuc, "p_mantel_euc_feat": p_feuc,
+                "rho_untrained_hyp": r_uh, "p_mantel_untrained_hyp": p_uh,
+                "rho_untrained_euc": r_ue, "p_mantel_untrained_euc": p_ue
             })
             
     df_eval = pd.DataFrame(eval_records)
@@ -1039,24 +1240,35 @@ def run_statistical_evaluation(subject_rdms, heldout_subs=[6, 7, 8, 9, 10]):
     for t_name in targets.keys():
         sub_df = df_eval[df_eval["target"] == t_name]
         
-        lor_vals = sub_df["rho_heegnet_lorentz"].values
+        adapt_vals = sub_df["rho_heegnet_adapted"].values
+        plain_vals = sub_df["rho_heegnet_plain"].values
         meuc_vals = sub_df["rho_eegnet_euc_model"].values
         feuc_vals = sub_df["rho_heegnet_euc_feat"].values
+        uh_vals = sub_df["rho_untrained_hyp"].values
         
-        # Hyperbolic Model vs Euclidean Model
-        t_stat_m, p_val_m = stats.ttest_rel(lor_vals, meuc_vals)
-        # Lorentz Metric vs Euclidean Metric (same features)
-        t_stat_f, p_val_f = stats.ttest_rel(lor_vals, feuc_vals)
+        # 1. Adapted vs Plain (Gain from BN Recalibration / SFUDA)
+        t_stat_adapt, p_val_adapt = stats.ttest_rel(adapt_vals, plain_vals)
+        # 2. Hyperbolic Model (Adapted) vs Euclidean Model
+        t_stat_m, p_val_m = stats.ttest_rel(adapt_vals, meuc_vals)
+        # 3. Lorentz Metric vs Euclidean Metric (same adapted features)
+        t_stat_f, p_val_f = stats.ttest_rel(adapt_vals, feuc_vals)
+        # 4. Trained Adapted vs Untrained Baseline
+        t_stat_learn, p_val_learn = stats.ttest_rel(adapt_vals, uh_vals)
         
         stats_summary.append({
             "target": t_name,
-            "mean_heegnet_lorentz": np.mean(lor_vals), "sem_heegnet_lorentz": stats.sem(lor_vals),
+            "mean_heegnet_adapted": np.mean(adapt_vals), "sem_heegnet_adapted": stats.sem(adapt_vals),
+            "mean_heegnet_plain": np.mean(plain_vals), "sem_heegnet_plain": stats.sem(plain_vals),
             "mean_eegnet_euc_model": np.mean(meuc_vals), "sem_eegnet_euc_model": stats.sem(meuc_vals),
-            "mean_heegnet_euc_feat": np.mean(feuc_vals), "sem_heegnet_euc_feat": stats.sem(feuc_vals),
-            "model_diff (Hyp - Euc)": np.mean(lor_vals - meuc_vals),
+            "mean_untrained_hyp": np.mean(uh_vals), "sem_untrained_hyp": stats.sem(uh_vals),
+            "adaptation_gain (Adapted - Plain)": np.mean(adapt_vals - plain_vals),
+            "t_stat_adaptation": t_stat_adapt, "p_val_adaptation": p_val_adapt,
+            "architecture_diff (Hyp - Euc)": np.mean(adapt_vals - meuc_vals),
             "paired_t_stat_model": t_stat_m, "paired_p_val_model": p_val_m,
-            "metric_diff (Lor - Euc)": np.mean(lor_vals - feuc_vals),
-            "paired_t_stat_metric": t_stat_f, "paired_p_val_metric": p_val_f
+            "metric_diff (Lor - Euc)": np.mean(adapt_vals - feuc_vals),
+            "paired_t_stat_metric": t_stat_f, "paired_p_val_metric": p_val_f,
+            "learning_gain (Trained - Untrained)": np.mean(adapt_vals - uh_vals),
+            "t_stat_learning": t_stat_learn, "p_val_learning": p_val_learn
         })
         
     df_stats = pd.DataFrame(stats_summary)
@@ -1064,21 +1276,50 @@ def run_statistical_evaluation(subject_rdms, heldout_subs=[6, 7, 8, 9, 10]):
     
     print("\nSubject-Level Paired Comparisons Across 5 Held-Out Brains:")
     for _, row in df_stats.iterrows():
-        print(f"  {row['target']:32s} | Hyp Model: {row['mean_heegnet_lorentz']:+.4f} ± {row['sem_heegnet_lorentz']:.4f} | "
-              f"Euc Model: {row['mean_eegnet_euc_model']:+.4f} ± {row['sem_eegnet_euc_model']:.4f} | "
-              f"Diff: {row['model_diff (Hyp - Euc)']:+.4f} (t={row['paired_t_stat_model']:.2f}, p={row['paired_p_val_model']:.4f})")
+        print(f"  {row['target']:32s} | Hyp Adapted: {row['mean_heegnet_adapted']:+.4f} ± {row['sem_heegnet_adapted']:.4f} | "
+              f"Hyp Plain: {row['mean_heegnet_plain']:+.4f} | Euc: {row['mean_eegnet_euc_model']:+.4f} | "
+              f"Adapt Gain: {row['adaptation_gain (Adapted - Plain)']:+.4f} (p={row['p_val_adaptation']:.4f}) | "
+              f"Hyp vs Euc: {row['architecture_diff (Hyp - Euc)']:+.4f} (p={row['paired_p_val_model']:.4f})")
         
     print(f"\n[Saved] Paired Statistical Summary -> {TABLES_DIR / 'paired_statistical_tests_summary.csv'}")
-    return df_eval, df_stats
+    
+    # Common Metric Gromov Delta-Hyperbolicity with Bootstrap 95% CIs
+    print("\n--- Common-Metric Gromov Hyperbolicity Benchmarks (Scaled to Median Distance = 1.0) ---")
+    gromov_spaces = {
+        "WordNet Hierarchy (Wu-Palmer)": ref_data["hierarchy_wup"],
+        "Raw Neural (Primary 50–300 ms)": neural_data["sub06_primary_ang"],
+        "Deep Visual (ResNet Avgpool)": ref_data["visual_deep_avgpool"],
+        "Semantic Language (MiniLM)": ref_data["semantic_names"],
+        "HEEGNet Lorentz Adapted (Sub-06)": subject_rdms["sub06"]["heegnet_lorentz_adapted"],
+        "HEEGNet Lorentz Plain (Sub-06)": subject_rdms["sub06"]["heegnet_lorentz_plain"],
+        "EEGNet Euclidean Model (Sub-06)": subject_rdms["sub06"]["eegnet_euclidean_model"],
+        "Untrained HEEGNet Lorentz (Sub-06)": subject_rdms["sub06"]["untrained_heegnet_lorentz"],
+        "Synthetic Flat Euclidean (R^2)": squareform(pdist(np.random.RandomState(42).randn(200, 2))),
+        "Synthetic High-D Euclidean (R^48)": squareform(pdist(np.random.RandomState(42).randn(200, 48)))
+    }
+    gromov_records = []
+    for sp_name, sp_rdm in gromov_spaces.items():
+        g_res = compute_gromov_hyperbolicity_common_metric(sp_rdm, n_quadruplets=50000, n_boot=200, seed=42)
+        gromov_records.append({
+            "representational_space": sp_name,
+            "norm_mean_delta": round(g_res["norm_mean_delta"], 4),
+            "norm_p95_delta": round(g_res["norm_p95_delta"], 4),
+            "norm_max_delta": round(g_res["norm_max_delta"], 4),
+            "ci95_low": round(g_res["ci95_low"], 4),
+            "ci95_high": round(g_res["ci95_high"], 4)
+        })
+        print(f"  {sp_name:36s}: Delta = {g_res['norm_mean_delta']:.4f} [95% CI: {g_res['ci95_low']:.4f}, {g_res['ci95_high']:.4f}]")
+        
+    df_gromov = pd.DataFrame(gromov_records)
+    df_gromov.to_csv(TABLES_DIR / "common_metric_gromov_hyperbolicity.csv", index=False)
+    print(f"[Saved] Common Metric Gromov Table -> {TABLES_DIR / 'common_metric_gromov_hyperbolicity.csv'}")
+    
+    return df_eval, df_stats, df_gromov
 
-
-# ==============================================================================
-# SECTION 7: PUBLICATION FIGURES GENERATION
-# ==============================================================================
 
 def generate_rigorous_figures(df_splits, history, df_stats):
     print("\n" + "=" * 80)
-    print("PHASE 5: GENERATING PUBLICATION FIGURES (FIG 13 & FIG 14)")
+    print("PHASE 5: GENERATING REVISED PUBLICATION FIGURES (FIG 13 & FIG 14)")
     print("=" * 80)
     
     plt.rcParams.update({
@@ -1090,7 +1331,7 @@ def generate_rigorous_figures(df_splits, history, df_stats):
         "axes.labelsize": 10,
         "xtick.labelsize": 9,
         "ytick.labelsize": 9,
-        "legend.fontsize": 9,
+        "legend.fontsize": 8.5,
         "figure.titlesize": 13,
         "figure.dpi": 300
     })
@@ -1136,7 +1377,7 @@ def generate_rigorous_figures(df_splits, history, df_stats):
     plt.close()
     print(f"[Saved] Figure 13 -> {fig13_path}")
     
-    # Figure 14: Matched HEEGNet vs Euclidean EEGNet
+    # Figure 14: Matched HEEGNet vs Euclidean EEGNet with Plain vs Adapted Comparison
     fig, axes = plt.subplots(1, 2, figsize=(16, 5.5))
     df_h = pd.DataFrame(history)
     axes[0].plot(df_h["epoch"], df_h["hyp_train_loss"], "o-", color="#1f77b4", label="HEEGNet Train Loss")
@@ -1150,17 +1391,21 @@ def generate_rigorous_figures(df_splits, history, df_stats):
     axes[0].legend()
     
     x = np.arange(len(df_stats))
-    width = 0.35
-    axes[1].bar(x - width/2, df_stats["mean_heegnet_lorentz"], width, yerr=df_stats["sem_heegnet_lorentz"],
-                capsize=3, label="HEEGNet (Hyperbolic Model)", color="#1f77b4")
-    axes[1].bar(x + width/2, df_stats["mean_eegnet_euc_model"], width, yerr=df_stats["sem_eegnet_euc_model"],
-                capsize=3, label="EEGNet (Euclidean Model)", color="#ff7f0e")
-    axes[1].set_title("B. Subject-Level Alignment on Held-Out Cohort (N=5, Mean ± SEM)")
+    width = 0.2
+    axes[1].bar(x - 1.5*width, df_stats["mean_untrained_hyp"], width, yerr=df_stats["sem_untrained_hyp"],
+                capsize=3, label="Untrained Baseline", color="#7f7f7f")
+    axes[1].bar(x - 0.5*width, df_stats["mean_eegnet_euc_model"], width, yerr=df_stats["sem_eegnet_euc_model"],
+                capsize=3, label="EEGNet (Euclidean)", color="#ff7f0e")
+    axes[1].bar(x + 0.5*width, df_stats["mean_heegnet_plain"], width, yerr=df_stats["sem_heegnet_plain"],
+                capsize=3, label="HEEGNet Plain (Source BN)", color="#aec7e8")
+    axes[1].bar(x + 1.5*width, df_stats["mean_heegnet_adapted"], width, yerr=df_stats["sem_heegnet_adapted"],
+                capsize=3, label="HEEGNet Adapted (Target BN)", color="#1f77b4")
+    axes[1].set_title("B. Held-Out Evaluation on Unseen Brains (N=5, Mean ± SEM)")
     axes[1].set_xticks(x)
     axes[1].set_xticklabels([t.replace(" (", "\n(") for t in df_stats["target"]], rotation=25, ha="right", fontsize=8)
     axes[1].set_ylabel("Spearman Rank Correlation (rho)")
     axes[1].grid(True, linestyle="--", alpha=0.5, axis="y")
-    axes[1].legend()
+    axes[1].legend(loc="upper left")
     
     plt.tight_layout()
     fig14_path = FIGURES_DIR / "fig14_matched_heegnet_vs_eegnet_heldout_evaluation.png"
@@ -1193,14 +1438,14 @@ def main():
     
     # 3. Change 1 & 2: Matched Training with In-Depth Diagnostics
     model_hyp, model_euc, history = train_matched_models(
-        X_tr, y_tr, d_tr, X_va, y_va, d_va, n_dom, n_epochs=6
+        X_tr, y_tr, d_tr, X_va, y_va, d_va, n_dom, n_epochs=12
     )
     
-    # 4. Subject-Level Extraction & Intrinsic Fréchet Centroids (Points 18–20)
-    subject_rdms = extract_subject_level_rdms(model_hyp, model_euc, heldout_subs=test_subs)
+    # 4. Subject-Level Extraction & Intrinsic Fréchet Centroids (Points 18–20 & Domain Adaptation)
+    subject_rdms = extract_subject_level_rdms(model_hyp, model_euc, heldout_subs=test_subs, n_train_domains=n_dom)
     
-    # 5. Statistical Rigor: Paired t-tests & Mantel Permutation Tests (Points 21–25)
-    df_eval, df_stats = run_statistical_evaluation(subject_rdms, heldout_subs=test_subs)
+    # 5. Statistical Rigor: Paired t-tests & 10,000-Permutation Mantel Tests (Points 21–25)
+    df_eval, df_stats, df_gromov = run_statistical_evaluation(subject_rdms, heldout_subs=test_subs)
     
     # 6. Generate Revised Figures
     generate_rigorous_figures(df_splits, history, df_stats)

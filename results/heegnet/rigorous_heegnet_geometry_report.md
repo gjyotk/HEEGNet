@@ -1,3 +1,6 @@
+> [!WARNING]
+> **SUPERSEDED REPORT**: This document reflects intermediate Stage 5 evaluations without explicit target-domain recalibration on held-out test data. Refer to [`results/rigorous_evaluation/`](file:///usershome/cv13/projects/heeg-net/HEEGNet/results/rigorous_evaluation/) for the final leak-free and calibrated benchmarks.
+
 # Rigorous Empirical Evaluation of Hyperbolic EEGNet (HEEGNet) and Neural Representational Geometry
 
 **Project**: THINGS-EEG2 Representational Geometry & Hyperbolic Neural Decoding  

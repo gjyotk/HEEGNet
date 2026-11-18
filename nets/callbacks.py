@@ -61,11 +61,12 @@ class MomentumBatchNormScheduler(ConstantMomentumBatchNormScheduler):
         return f'MomentumBatchNormScheduler - eta={self.eta_:.3f}, eta_tst={self.eta_test_:.3f}'
 
     def on_train_epoch_start(self, trainer, net):
-        self.eta_ = 1. - (self.rho ** (self.epochs * max(self.epochs - trainer.current_epoch,0)/(self.epochs-1)) - self.rho ** self.epochs)
+        denom = max(self.epochs - 1, 1)
+        self.eta_ = 1. - (self.rho ** (self.epochs * max(self.epochs - trainer.current_epoch,0)/denom) - self.rho ** self.epochs)
         for m in self.bn_modules_:
             m.set_eta(eta = self.eta_)
         
-        w = max(self.epochs - trainer.current_epoch,0)/(self.epochs-1)
+        w = max(self.epochs - trainer.current_epoch,0)/denom
         tau_test = self.tau0 ** (self.bs/self.bs0 * (1-w) + w * 1)
         self.eta_test_ = 1 - tau_test
         for m in self.bn_modules_:

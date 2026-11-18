@@ -428,6 +428,6 @@
       "hierarchy_lin"
     ]
   },
-  "layer3_vs_avgpool_correlation": 0.2932010889053345,
+  "layer3_vs_avgpool_correlation": 0.2932010787755655,
   "saved_path": "/usershome/cv13/projects/heeg-net/HEEGNet/results/neural_geometry/rdms/stage1_final_reference_rdms.npz"
 }

@@ -46,11 +46,17 @@ import zipfile
 import time
 from pathlib import Path
 
+# Self-healing python interpreter resolution: ensure .venv python is used
+BASE_DIR_PATH = Path(__file__).resolve().parent
+VENV_PYTHON = BASE_DIR_PATH / ".venv/bin/python"
+if VENV_PYTHON.exists() and sys.executable != str(VENV_PYTHON):
+    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON)] + sys.argv)
+
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/mpl_cache")
 os.environ.setdefault("TORCH_HOME", "/tmp/torch_cache")
 os.environ.setdefault("HF_HOME", "/tmp/hf_cache")
 
-import numpy as np
+import numpy as np 
 import pandas as pd
 from scipy import stats
 from scipy.spatial.distance import squareform
@@ -122,6 +128,11 @@ def rdm_triu(rdm):
 def rdm_corr(rdmA, rdmB, method="pearson"):
     a = rdm_triu(rdmA)
     b = rdm_triu(rdmB)
+    valid = np.isfinite(a) & np.isfinite(b)
+    if not np.all(valid):
+        a, b = a[valid], b[valid]
+    if len(a) < 3 or np.std(a) < 1e-12 or np.std(b) < 1e-12:
+        return 0.0, 1.0
     if method == "pearson":
         r, p = stats.pearsonr(a, b)
     elif method == "spearman":
@@ -220,7 +231,7 @@ def poincare_distance_torch(u, eps=1e-5):
     sq_dist = torch.sum((u.unsqueeze(1) - u.unsqueeze(0)) ** 2, dim=-1)
     denom = (1.0 - sq_u) * (1.0 - sq_u.t())
     arg = 1.0 + 2.0 * sq_dist / (denom.clamp(min=eps))
-    return torch.acosh(arg.clamp(min=1.0))
+    return torch.acosh(arg.clamp(min=1.0 + 1e-6))
 
 
 def fit_poincare(D_target, dim=2, lr=0.03, n_epochs=600, seed=42):
@@ -690,18 +701,20 @@ def stage_4_compare_embeddings(stage2_neural_bundle, ref_rdms):
     # 3. Deep Visual RDM (ResNet-50 Avgpool)
     # 4. Semantic RDM (MiniLM Definitions)
     # 5. WordNet Hierarchy RDM (Wu-Palmer)
+    # Strictly disjoint subject sets for leak-free Stage 4 generalization:
+    # Development brain: Subjects 1-5 (used exclusively for fitting)
+    # Confirmation brain: Subjects 6-10 (used exclusively for out-of-sample testing)
+    dev_brain = np.mean([stage2_neural_bundle[f"sub{s:02d}_primary_ang"] for s in range(1, 6)], axis=0)
+    confirmation_brain = np.mean([stage2_neural_bundle[f"sub{s:02d}_primary_ang"] for s in range(6, 11)], axis=0)
+
     targets = {
-        "Neural RDM (Primary 50–300 ms)": stage2_neural_bundle["primary_grand_ang"],
-        "Neural RDM (190 ms N170 Peak)": stage2_neural_bundle["secondary_190ms_grand_ang"],
+        "Neural RDM (Primary 50–300 ms)": dev_brain,
+        "Neural RDM (190 ms N170 Peak)": np.mean([stage2_neural_bundle[f"sub{s:02d}_190ms_ang"] for s in range(1, 6)], axis=0),
         "Low-Level Visual (Composite)": ref_rdms["visual_low_level_composite"],
         "Deep Visual (ResNet Avgpool)": ref_rdms["visual_deep_avgpool"],
         "Semantic Language (MiniLM)": ref_rdms["semantic_definitions"],
         "WordNet Hierarchy (Wu-Palmer)": ref_rdms["hierarchy_wup"]
     }
-
-    # Held-out neural reference for independent alignment
-    # (Leave-One-Subject-Out: average of subjects 6-10 as independent confirmation brain)
-    confirmation_brain = np.mean([stage2_neural_bundle[f"sub{s:02d}_primary_ang"] for s in range(6, 11)], axis=0)
     hierarchy_ground_truth = ref_rdms["hierarchy_wup"]
     semantic_ground_truth = ref_rdms["semantic_definitions"]
 

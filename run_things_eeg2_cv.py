@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
 Leave-one-subject-out cross-validation on THINGS-EEG2 (test partition) with HEEGNet.
 
@@ -26,6 +26,18 @@ Still UNVERIFIED (check in nets/):
 """
 
 import os
+import sys
+from pathlib import Path
+
+# Self-healing python interpreter resolution: ensure .venv python is used
+BASE_DIR_PATH = Path(__file__).resolve().parent
+VENV_PYTHON = BASE_DIR_PATH / ".venv/bin/python"
+if VENV_PYTHON.exists() and sys.executable != str(VENV_PYTHON):
+    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON)] + sys.argv)
+
+os.environ.setdefault("MPLCONFIGDIR", "/tmp/mpl_cache")
+os.makedirs("/tmp/mpl_cache", exist_ok=True)
+
 import json
 import time
 import warnings
@@ -41,7 +53,7 @@ import sklearn.preprocessing
 from nets.utils.data import StratifiedDomainDataLoader, DomainDataset
 from nets.trainer import Trainer
 from nets.callbacks import EarlyStopping, MomentumBatchNormScheduler
-from nets.model import HEEGNet
+from nets.model import HEEGNet, EuclideanEEGNet
 import nets.functionals as fn
 import nets.batchnorm as bn
 
@@ -69,6 +81,8 @@ TEST_SUBJECTS = [int(s) for s in _ts.split(",") if s] if _ts else None
 USE_MULTI_GPU = _env_bool("USE_MULTI_GPU", False)   # leave False: DataParallel can break domain BN
 USE_SFUDA = _env_bool("USE_SFUDA", True)            # also report source-free adaptation results
 EPOCHS = int(os.environ.get("EPOCHS", 100))         # upper bound; early stopping decides the rest
+MIN_EPOCHS = int(os.environ.get("MIN_EPOCHS", min(70, max(1, EPOCHS - 1))))
+MODEL_TYPE = os.environ.get("MODEL_TYPE", "heegnet").strip().lower()
 DTYPE = torch.float32 if os.environ.get("DTYPE", "float64") == "float32" else torch.float64
 SEED = int(os.environ.get("SEED", 42))
 TRAIN_EVAL_EVERY = int(os.environ.get("TRAIN_EVAL_EVERY", 10))  # full-train-set eval frequency (epochs)
@@ -97,8 +111,8 @@ cfg = dict(
     ),
 )
 cfg["epochs"] = EPOCHS
-cfg["min_epochs"] = min(70, max(1, EPOCHS - 1))
-cfg["bn_sched_epochs"] = max(1, EPOCHS - 10)   # never negative
+cfg["min_epochs"] = MIN_EPOCHS
+cfg["bn_sched_epochs"] = max(2, EPOCHS - 10)   # never negative and >= 2
 
 # ==================================================================
 # Devices
@@ -226,7 +240,10 @@ class FastTrainer(Trainer):
     def fit(self, model, train_dataloader, val_dataloader):
         model = model.to(dtype=self.dtype_, device=self.device_)
         opt_model = model.module if isinstance(model, torch.nn.DataParallel) else model
-        self.optimizer = opt_model.configure_optimizers(lr=self.lr, weight_decay=self.weight_decay)
+        if hasattr(opt_model, "configure_optimizers"):
+            self.optimizer = opt_model.configure_optimizers(lr=self.lr, weight_decay=self.weight_decay)
+        else:
+            self.optimizer = torch.optim.Adam(opt_model.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         [cb.on_fit_start(self, model) for cb in self.callbacks]
 
         for epoch in range(self.epochs):
@@ -315,17 +332,15 @@ def main():
         print(f"  Fold {ix_fold + 1}/{n_folds} | test subject(s): {test_subs}")
         print("=" * 60)
 
-        # Repetition-based split within each domain:
-        # Allocates first (1 - val_size) repetitions to train and remaining to val.
-        # This guarantees:
-        # 1. No repeated stimulus observation leakage across train and val.
-        # 2. Perfect class balance (all 200 classes present in train and val).
-        # 3. All training domains are present so domain batch norm statistics are learned.
-        n_val_reps = max(1, int(round(REPS_PER_SESSION * cfg["validation_size"])))
-        n_train_reps = REPS_PER_SESSION - n_val_reps
-        fit_reps = reps[fit_idx]
-        train_idx = np.where(fit_reps < n_train_reps)[0]
-        val_idx = np.where(fit_reps >= n_train_reps)[0]
+        # Subject-level hold-out validation:
+        # Hold out an entire training subject for validation to guarantee genuine cross-subject validation
+        fit_subs = np.unique(subjects[fit_idx])
+        val_subject = fit_subs[-1]
+        fit_sub_mask = subjects[fit_idx]
+        train_idx = np.where(fit_sub_mask != val_subject)[0]
+        val_idx = np.where(fit_sub_mask == val_subject)[0]
+        print(f"  Hold-out validation subject: Sub-{val_subject:02d} ({len(val_idx)} trials) | "
+              f"Train: {len(train_idx)} trials across {len(fit_subs)-1} subjects")
 
         du = domain[fit_idx][train_idx].unique()
         domains_per_batch = min(cfg["domains_per_batch"], len(du))
@@ -345,12 +360,17 @@ def main():
             shuffle=True, drop_last=False, **loader_kwargs,
         )
         loader_val = torch.utils.data.DataLoader(
-            ds_val, batch_size=len(ds_val), **loader_kwargs
+            ds_val, batch_size=min(2000, len(ds_val)), **loader_kwargs
         )
 
-        model = HEEGNet(device=device, dtype=cfg["dtype"], **mdl_kwargs).to(
-            device=device, dtype=cfg["dtype"]
-        )
+        if MODEL_TYPE == "euclidean":
+            model = EuclideanEEGNet(chunk_size=X.shape[2], num_electrodes=X.shape[1], num_classes=N_CLASSES).to(
+                device=device, dtype=cfg["dtype"]
+            )
+        else:
+            model = HEEGNet(device=device, dtype=cfg["dtype"], **mdl_kwargs).to(
+                device=device, dtype=cfg["dtype"]
+            )
         if len(gpu_ids) > 1:
             model = torch.nn.DataParallel(model, device_ids=gpu_ids,
                                           output_device=gpu_ids[0])
@@ -363,12 +383,13 @@ def main():
             bs=cfg["batch_size_train"] / domains_per_batch,
             tau0=0.85,
         )
+        swd_w = 0.0 if MODEL_TYPE == "euclidean" else cfg["swd_weight"]
         trainer = FastTrainer(
             train_eval_every=TRAIN_EVAL_EVERY,
             max_epochs=cfg["epochs"], min_epochs=cfg["min_epochs"],
             callbacks=[es, bn_sched], loss=torch.nn.CrossEntropyLoss(),
             device=device, dtype=cfg["dtype"],
-            swd_weight=cfg["swd_weight"], lr=cfg["lr"],
+            swd_weight=swd_w, lr=cfg["lr"],
         )
 
         trainer.fit(model, train_dataloader=loader_train, val_dataloader=loader_val)
@@ -380,29 +401,52 @@ def main():
             mask = domain[test_idx] == td
             ds_test = DomainDataset(X[test_idx][mask], y[test_idx][mask],
                                     domain[test_idx][mask])
-            loader_test = torch.utils.data.DataLoader(ds_test, batch_size=len(ds_test))
+            loader_test = torch.utils.data.DataLoader(ds_test, batch_size=min(2000, len(ds_test)))
 
             # (a) no adaptation
             res_plain = trainer.test(base_model, dataloader=loader_test)
 
             # (b) with SFUDA (on a copy, with dummy labels)
-            if USE_SFUDA:
+            if USE_SFUDA and MODEL_TYPE != "euclidean" and hasattr(base_model, "domainadapt_finetune"):
                 sfuda_net = deepcopy(base_model)
                 sfuda_offline(ds_test, sfuda_net)
                 res_sfuda = trainer.test(sfuda_net, dataloader=loader_test)
             else:
                 res_sfuda = dict(loss=float("nan"), score=float("nan"))
 
-            print(f"    domain {td.item():3d} | plain: loss={res_plain['loss']:.4f} "
-                  f"acc={res_plain['score']:.4f} | SFUDA: loss={res_sfuda['loss']:.4f} "
-                  f"acc={res_sfuda['score']:.4f}")
+            # (c) 20-rep averaged pseudo-trials (cleaner SNR)
+            X_dom = X[test_idx][mask]
+            y_dom = y[test_idx][mask]
+            X_dom_avg = []
+            y_dom_avg = []
+            for c in range(N_CLASSES):
+                c_mask = (y_dom == c)
+                if c_mask.any():
+                    X_dom_avg.append(X_dom[c_mask].mean(dim=0))
+                    y_dom_avg.append(c)
+            X_dom_avg = torch.stack(X_dom_avg, dim=0)
+            y_dom_avg = torch.tensor(y_dom_avg, dtype=torch.long)
+            d_dom_avg = torch.full((len(y_dom_avg),), td.item(), dtype=torch.long)
+            ds_test_avg = DomainDataset(X_dom_avg, y_dom_avg, d_dom_avg)
+            loader_test_avg = torch.utils.data.DataLoader(ds_test_avg, batch_size=len(ds_test_avg))
+
+            res_avg_plain = trainer.test(base_model, dataloader=loader_test_avg)
+            if USE_SFUDA and MODEL_TYPE != "euclidean" and hasattr(base_model, "domainadapt_finetune"):
+                res_avg_sfuda = trainer.test(sfuda_net, dataloader=loader_test_avg)
+            else:
+                res_avg_sfuda = dict(loss=float("nan"), score=float("nan"))
+
+            print(f"    domain {td.item():3d} | single plain: acc={res_plain['score']:.4f} sfuda={res_sfuda['score']:.4f} | "
+                  f"20-rep avg plain: acc={res_avg_plain['score']:.4f} sfuda={res_avg_sfuda['score']:.4f}")
 
             records.append(dict(
-                dataset="things_eeg2", fold=ix_fold,
+                dataset="things_eeg2", fold=ix_fold, model_type=MODEL_TYPE, seed=SEED,
                 test_subject=int(test_subs[0]) if len(test_subs) == 1 else test_subs.tolist(),
                 domain=int(td.item()), best_epoch=int(es.best_epoch),
                 loss_plain=float(res_plain["loss"]), score_plain=float(res_plain["score"]),
                 loss_sfuda=float(res_sfuda["loss"]), score_sfuda=float(res_sfuda["score"]),
+                loss_avg_plain=float(res_avg_plain["loss"]), score_avg_plain=float(res_avg_plain["score"]),
+                loss_avg_sfuda=float(res_avg_sfuda["loss"]), score_avg_sfuda=float(res_avg_sfuda["score"]),
             ))
         print()
 

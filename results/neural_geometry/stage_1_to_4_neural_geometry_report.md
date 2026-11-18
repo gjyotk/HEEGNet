@@ -1,3 +1,6 @@
+> [!WARNING]
+> **SUPERSEDED REPORT**: The Stage 4 embeddings in this document were fit in-sample. The leak-free Stage 4 embedding generalization benchmark is documented in [`results/rigorous_evaluation/`](file:///usershome/cv13/projects/heeg-net/HEEGNet/results/rigorous_evaluation/).
+
 # Empirical Investigation of Neural Representational Geometry: Stages 1–4 Final Report
 
 **Project**: HEEGNet (Hyperbolic EEG Network for Visual Concept Decoding)  

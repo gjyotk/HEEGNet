@@ -156,12 +156,69 @@ class HEEGNet(nn.Module):
 
         return RiemannianAdam(pgroups, lr=lr, weight_decay=weight_decay)
     
-    def domainadapt_finetune(self, x, y, d, target_domains):
+    def domainadapt_finetune(self, x, y=None, d=None, target_domains=None):
         if self.domain_adaptation:
             self.bn.set_test_stats_mode(bn.BatchNormTestStatsMode.REFIT)
+            if d is None:
+                d = torch.zeros(len(x), dtype=torch.long, device=x.device)
 
             with torch.no_grad():
                 for du in d.unique():
                     self.forward(x[d==du], d[d==du])
 
             self.bn.set_test_stats_mode(bn.BatchNormTestStatsMode.BUFFER)
+
+
+class EuclideanEEGNet(nn.Module):
+    """
+    Exact structural Euclidean counterpart of HEEGNet.
+    Uses identical block1 (temporal + depthwise spatial conv) and block2 (separable conv)
+    projecting to a 48-dimensional Euclidean feature space before classification.
+    """
+    def __init__(self, chunk_size: int = 100, num_electrodes: int = 63,
+                 F1: int = 8, F2: int = 16, D: int = 2, num_classes: int = 1654,
+                 kernel_1: int = 64, kernel_2: int = 16, dropout: float = 0.25,
+                 pool_1: int = 4, pool_2: int = 8):
+        super().__init__()
+        self.F1 = F1
+        self.F2 = F2
+        self.D = D
+        self.chunk_size = chunk_size
+        self.num_electrodes = num_electrodes
+        
+        self.block1 = nn.Sequential(
+            nn.Conv2d(1, F1, (1, kernel_1), stride=1, padding=(0, kernel_1 // 2), bias=False),
+            nn.BatchNorm2d(F1, momentum=0.01, affine=True, eps=1e-3),
+            nn.Conv2d(F1, F1 * D, (num_electrodes, 1), stride=1, padding=(0, 0), groups=F1, bias=False),
+            nn.BatchNorm2d(F1 * D, momentum=0.01, affine=True, eps=1e-3),
+            nn.ELU(),
+            nn.AvgPool2d((1, pool_1), stride=pool_1),
+            nn.Dropout(p=dropout)
+        )
+        self.block2 = nn.Sequential(
+            nn.Conv2d(F1 * D, F1 * D, (1, kernel_2), stride=1, padding=(0, kernel_2 // 2), bias=False, groups=F1 * D),
+            nn.Conv2d(F1 * D, F2, 1, padding=(0, 0), groups=1, bias=False, stride=1),
+            nn.BatchNorm2d(F2, momentum=0.01, affine=True, eps=1e-3),
+            nn.ELU(),
+            nn.AvgPool2d((1, pool_2), stride=pool_2),
+            nn.Dropout(p=dropout)
+        )
+        
+        with torch.no_grad():
+            mock_in = torch.zeros(1, 1, num_electrodes, chunk_size)
+            mock_out = self.block2(self.block1(mock_in))
+            self.feat_dim = mock_out.view(1, -1).shape[1]
+            
+        self.classifier = nn.Linear(self.feat_dim, num_classes)
+        
+    def forward(self, inputs=None, domains=None, x=None, **kwargs):
+        if inputs is None and x is not None:
+            inputs = x
+        x = inputs
+        if x.dim() == 3:
+            x = x.unsqueeze(1)
+        x = self.block1(x)
+        x = self.block2(x)
+        features = x.flatten(1)
+        logits = self.classifier(features)
+        return logits, features

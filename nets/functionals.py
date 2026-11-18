@@ -1,11 +1,13 @@
 from lib.lorentz.manifold import CustomLorentz
 import torch
+import torch.nn as nn
 from torch.functional import Tensor
 import numpy as np
+from scipy import stats
+from scipy.spatial.distance import pdist, squareform
 from hsssw.lib.hhsw import horo_hyper_sliced_wasserstein_lorentz
 from scipy.linalg import sqrtm, inv 
 import os
-import pickle
 
 def euler_align(raw_array, reg_eps: float = 1e-4, ref_cov: np.ndarray = None, return_cov: bool = False):
     """
@@ -43,114 +45,147 @@ def euler_align(raw_array, reg_eps: float = 1e-4, ref_cov: np.ndarray = None, re
     return aligned
 
 
-def swd_loss(x_flatten: Tensor, domains: Tensor):
-
+def swd_loss(x_flatten: Tensor, domains: Tensor, seed: int = 42):
+    """
+    Computes Sliced Wasserstein Distance on the Lorentz hyperboloid
+    against a reference wrapped standard Gaussian with reproducible generator.
+    """
     du = domains.unique()
     manifold = CustomLorentz()
     loss = 0
+    gen = torch.Generator(device=x_flatten.device)
+    gen.manual_seed(seed)
+    
     for i in du:
         x = x_flatten[domains == i]
-        x_gaussian = torch.normal(0, 1, size=x.shape, dtype=x.dtype, device=x.device)
+        x_gaussian = torch.randn(x.shape, dtype=x.dtype, device=x.device, generator=gen)
         x_gaussian = x_gaussian / (x_gaussian.norm(p=2, dim=-1, keepdim=True) + 1e-8)
         x_gaussian = manifold.expmap0(x_gaussian)
         loss += horo_hyper_sliced_wasserstein_lorentz(x, x_gaussian, 1000, device=x.device, p=2)
     return loss
 
-def load_dataset(path_, cache_path=None):
 
-    label_9class = np.array([
-        0,0,0,
-        1,1,1,
-        2,2,2,
-        3,3,3,
-        4,4,4,4,
-        5,5,5,
-        6,6,6,
-        7,7,7,
-        8,8,8
-    ], dtype=int)
-
-    if cache_path is None:
-        cache_path = os.path.join(os.path.dirname(os.path.abspath(path_)), 'faced_data')
-
-    for i in range(123):
-        path = f'{path_}/sub{i:03d}.pkl'
-        with open(path, 'rb') as f:
-            data = pickle.load(f)
-        path_new = os.path.join(cache_path, f'subject_{i}', 'session_1')
-        eeg_cache_path = os.path.join(path_new, 'eeg.npy')
-        label_cache_path = os.path.join(path_new, 'label.npy')
-        if not (os.path.exists(eeg_cache_path) and os.path.exists(label_cache_path)):
-            os.makedirs(path_new, exist_ok=True)
-            np.save(eeg_cache_path, data)
-            np.save(label_cache_path, label_9class)
-
-    all_data = []
-    all_labels = []
-    all_subjects = []
-    all_sessions = []
-    base_path = cache_path
-    # Get all subject folders
-    subject_folders = [f for f in os.listdir(base_path) if f.startswith('subject_')]
-    subject_folders.sort()  # Ensure consistent ordering
-    
-    for subject_folder in subject_folders:
-        subject_path = os.path.join(base_path, subject_folder)
-        if not os.path.isdir(subject_path):
-            continue
-            
-        # Extract subject number
-        subject_id = int(subject_folder.split('_')[1])
+def compute_lorentz_frechet_mean(pts: torch.Tensor, manifold: CustomLorentz = None,
+                                 tol: float = 1e-5, max_iter: int = 30, lr: float = 0.5):
+    """
+    Exact Riemannian Fréchet / Karcher mean on the Lorentz hyperboloid:
+      mu_{k+1} = Exp_{mu_k}( (lr / N) * sum_i Log_{mu_k}(x_i) )
+    pts: (N, d+1) tensor satisfying <x, x>_L = -1/c.
+    Stops dynamically when update norm is below tol.
+    """
+    if manifold is None:
+        manifold = CustomLorentz()
         
-        # Get all session folders for this subject
-        session_folders = [f for f in os.listdir(subject_path) if f.startswith('session_')]
-        session_folders.sort()  # Ensure consistent ordering
+    mu = pts.mean(dim=0, keepdim=True)
+    mu = manifold.projx(mu)
+    
+    for iteration in range(max_iter):
+        u = manifold.logmap(mu, pts)
+        v = u.mean(dim=0, keepdim=True)
+        v_norm = manifold.norm(v).item()
+        if v_norm < tol:
+            break
+        mu = manifold.expmap(mu, lr * v)
         
-        for session_folder in session_folders:
-            session_path = os.path.join(subject_path, session_folder)
-            if not os.path.isdir(session_path):
-                continue
-                
-            # Extract session number
-            session_id = int(session_folder.split('_')[1])
+    return mu.squeeze(0), iteration, v_norm
+
+
+def poincare_dist_matrix_torch(x: torch.Tensor, eps: float = 1e-5):
+    """Pairwise geodesic distances in the Poincaré disk/ball."""
+    sqnorms = torch.sum(x**2, dim=-1, keepdim=True)
+    sqnorms = torch.clamp(sqnorms, max=1.0 - eps)
+    dist_sq = torch.cdist(x, x, p=2)**2
+    alpha = 1.0 - sqnorms
+    gamma = 1.0 + 2.0 * dist_sq / torch.clamp(alpha @ alpha.T, min=eps)
+    gamma = torch.clamp(gamma, min=1.0 + eps)
+    return torch.acosh(gamma)
+
+
+def fit_embedding(dist_mat: np.ndarray, dim: int = 2, geometry: str = "poincare",
+                  epochs: int = 500, lr: float = 0.02, seed: int = 42, device = None):
+    """
+    Canonical shared embedding fitting function across hyperbolic (Poincaré) and Euclidean spaces.
+    Optimizes embeddings to minimize normalized distortion against target dist_mat.
+    """
+    if device is None:
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    n = dist_mat.shape[0]
+    D_target = torch.tensor(dist_mat, dtype=torch.float32, device=device)
+    triu_idx = torch.triu_indices(n, n, offset=1, device=device)
+    d_target_vec = D_target[triu_idx[0], triu_idx[1]]
+    
+    if geometry == "poincare":
+        raw_x = torch.randn(n, dim, device=device, dtype=torch.float32) * 0.05
+        param = nn.Parameter(raw_x)
+        optimizer = torch.optim.Adam([param], lr=lr)
+        
+        for _ in range(epochs):
+            optimizer.zero_grad()
+            norm = torch.norm(param, p=2, dim=-1, keepdim=True)
+            factor = torch.where(norm > 0.9999, 0.9999 / (norm + 1e-8), torch.ones_like(norm))
+            x_ball = param * factor
+            d_emb = poincare_dist_matrix_torch(x_ball)
+            d_emb_vec = d_emb[triu_idx[0], triu_idx[1]]
+            scale = torch.sum(d_emb_vec * d_target_vec) / (torch.sum(d_emb_vec**2) + 1e-8)
+            stress = torch.sum((scale * d_emb_vec - d_target_vec)**2) / (torch.sum(d_target_vec**2) + 1e-8)
+            stress.backward()
+            optimizer.step()
             
-            # Load EEG data and labels
-            eeg_file = os.path.join(session_path, 'eeg.npy')
-            label_file = os.path.join(session_path, 'label.npy')
+        with torch.no_grad():
+            norm = torch.norm(param, p=2, dim=-1, keepdim=True)
+            factor = torch.where(norm > 0.9999, 0.9999 / (norm + 1e-8), torch.ones_like(norm))
+            d_final = poincare_dist_matrix_torch(param * factor).cpu().numpy()
+    else:
+        raw_x = torch.randn(n, dim, device=device, dtype=torch.float32) * 0.1
+        param = nn.Parameter(raw_x)
+        optimizer = torch.optim.Adam([param], lr=lr)
+        
+        for _ in range(epochs):
+            optimizer.zero_grad()
+            d_emb = torch.cdist(param, param, p=2)
+            d_emb_vec = d_emb[triu_idx[0], triu_idx[1]]
+            scale = torch.sum(d_emb_vec * d_target_vec) / (torch.sum(d_emb_vec**2) + 1e-8)
+            stress = torch.sum((scale * d_emb_vec - d_target_vec)**2) / (torch.sum(d_target_vec**2) + 1e-8)
+            stress.backward()
+            optimizer.step()
             
-            if os.path.exists(eeg_file) and os.path.exists(label_file):
-                try:
-                    eeg_data = np.load(eeg_file)
-                    labels = np.load(label_file)
-                    
-                    # Ensure data shapes are compatible
-                    if eeg_data.shape[0] != labels.shape[0]:
-                        print(f"Warning: Shape mismatch in {subject_folder}/{session_folder}")
-                        continue
-                    
-                    # Store data
-                    all_data.append(eeg_data)
-                    all_labels.append(labels)
-                    
-                    # Create subject and session arrays for this batch
-                    n_trials = eeg_data.shape[0]
-                    all_subjects.extend([subject_id] * n_trials)
-                    all_sessions.extend([session_id] * n_trials)
-                    
-                    print(f"Loaded {subject_folder}/{session_folder}: {eeg_data.shape[0]} trials")
-                    
-                except Exception as e:
-                    print(f"Error loading {subject_folder}/{session_folder}: {e}")
-            else:
-                print(f"Missing files in {subject_folder}/{session_folder}")
-    
-    if not all_data:
-        raise ValueError("No data loaded. Check the path and file structure.")
-    
-    # Concatenate all data
-    data = np.concatenate(all_data, axis=0)
-    labels = np.concatenate(all_labels, axis=0)
-    subjects = np.array(all_subjects)
-    sessions = np.array(all_sessions)
-    
-    return data, labels, subjects, sessions
+        with torch.no_grad():
+            d_final = torch.cdist(param, param, p=2).cpu().numpy()
+            
+    iu = np.triu_indices(n, k=1)
+    d_tgt = dist_mat[iu]
+    d_fit = d_final[iu]
+    scale = np.sum(d_fit * d_tgt) / (np.sum(d_fit**2) + 1e-8)
+    distortion = np.sqrt(np.mean((scale * d_fit - d_tgt)**2)) / (np.std(d_tgt) + 1e-8)
+    rho, _ = stats.spearmanr(d_tgt, d_fit)
+    return d_final, float(distortion), float(rho)
+
+
+def unit_vector(v: np.ndarray) -> np.ndarray:
+    norm = np.linalg.norm(v)
+    return v / norm if norm > 0 else v
+
+
+def correlation_rdm(x: np.ndarray) -> np.ndarray:
+    """Computes standard correlation distance RDM (1 - Pearson r)."""
+    return squareform(pdist(x, metric="correlation"))
+
+
+def rdm_upper_tri(rdm: np.ndarray) -> np.ndarray:
+    """Returns upper triangular elements (k=1) of a symmetric RDM."""
+    n = rdm.shape[0]
+    return rdm[np.triu_indices(n, k=1)]
+
+
+def rdm_corr(rdm1: np.ndarray, rdm2: np.ndarray, method: str = "spearman") -> float:
+    """Computes upper-triangular rank correlation between two RDMs."""
+    v1 = rdm_upper_tri(rdm1)
+    v2 = rdm_upper_tri(rdm2)
+    if method == "spearman":
+        r, _ = stats.spearmanr(v1, v2)
+    else:
+        r, _ = stats.pearsonr(v1, v2)
+    return float(r)

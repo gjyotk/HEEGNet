@@ -1,4 +1,5 @@
-repetition_average,n_pseudo_trials,noise_variance,snr_improvement_ratio
-1,16540,1.5786,1.0
-2,8270,0.793,1.991
-4,3308,0.3997,3.95
+repetition_count,n_pseudo_trials,empirical_noise_variance,theoretical_variance_reduction,empirical_variance_reduction_ratio,theoretical_amplitude_snr_ratio,empirical_amplitude_snr_ratio
+1,16540,1.5786,1.0,1.0,1.0,1.0
+2,8270,0.793,2.0,1.991,1.414,1.411
+4,4135,0.399,4.0,3.956,2.0,1.989
+8,2067,0.2011,8.0,7.849,2.828,2.802

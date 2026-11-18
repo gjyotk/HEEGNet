@@ -31,6 +31,14 @@ import zipfile
 import time
 from pathlib import Path
 
+# Self-healing python interpreter resolution: ensure environment with sentence_transformers is used
+CLIMB_PYTHON = Path("/tmp/cv13_climb/.venv/bin/python")
+if CLIMB_PYTHON.exists() and sys.executable != str(CLIMB_PYTHON):
+    try:
+        import sentence_transformers
+    except ImportError:
+        os.execv(str(CLIMB_PYTHON), [str(CLIMB_PYTHON)] + sys.argv)
+
 # Ensure Matplotlib, Torch, and HuggingFace caches work cleanly
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/mpl_cache")
 os.environ.setdefault("TORCH_HOME", "/tmp/torch_cache")
@@ -575,6 +583,12 @@ def run_multiple_regression_rsa(ref_rdms, df_time_robust):
             "r_squared": r2
         })
 
+    # Compute Variance Inflation Factors (VIF) to test multicollinearity
+    X_pred = np.column_stack([x_low, x_deep, x_sem, x_hie])
+    C = np.corrcoef(X_pred, rowvar=False)
+    inv_C = np.linalg.inv(C)
+    vifs = np.diag(inv_C)
+
     sub_betas = np.array(sub_betas)  # (10, 4)
     df_mr_subs = pd.DataFrame(mr_records)
     df_mr_subs.to_csv(OUT_TABLES / "wp2_multiple_regression_subjects.csv", index=False)
@@ -592,12 +606,16 @@ def run_multiple_regression_rsa(ref_rdms, df_time_robust):
             "mean_beta": m,
             "sem_beta": sem,
             "t_stat": t_stat,
-            "p_val": p_val
+            "p_val": p_val,
+            "vif": float(vifs[idx])
         })
-        print(f"  {c:<20}: beta = {m:+.4f} ± {sem:.4f}, t(9) = {t_stat:+.3f}, p = {p_val:.4e}")
+        print(f"  {c:<20}: beta = {m:+.4f} ± {sem:.4f}, t(9) = {t_stat:+.3f}, p = {p_val:.4e}, VIF = {vifs[idx]:.2f}")
 
     df_mr_summary = pd.DataFrame(mr_summary)
     df_mr_summary.to_csv(OUT_TABLES / "wp2_multiple_regression_summary.csv", index=False)
+    
+    df_vif = pd.DataFrame([{"predictor": c, "vif": float(v)} for c, v in zip(cols, vifs)])
+    df_vif.to_csv(OUT_TABLES / "wp2_multiple_regression_vif.csv", index=False)
 
     # 2. Time-Resolved Multiple Regression RSA
     print("\nComputing Time-Resolved Multiple Regression RSA across EEG epoch...")
@@ -660,6 +678,7 @@ def poincare_distance_torch(u, eps=1e-5):
     denom = (1.0 - sq_u) * (1.0 - sq_u.t())
     arg = 1.0 + 2.0 * sq_dist / (denom.clamp(min=eps))
     return torch.acosh(arg.clamp(min=1.0))
+    return torch.acosh(arg.clamp(min=1.0 + 1e-6))
 
 
 def fit_poincare_embedding(target_dist_matrix, dim=2, lr=0.05, n_epochs=500):

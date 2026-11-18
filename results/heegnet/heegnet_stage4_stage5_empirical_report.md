@@ -1,3 +1,6 @@
+> [!WARNING]
+> **SUPERSEDED REPORT**: This early report contains single-subject / uncalibrated Stage 5 results and in-sample Stage 4 embeddings. It has been formally superseded by the leak-free, multi-subject frozen protocol documented in [`results/rigorous_evaluation/`](file:///usershome/cv13/projects/heeg-net/HEEGNet/results/rigorous_evaluation/).
+
 # Empirical Investigation of Neural Representational Geometry: Stages 4 & 5 Report
 
 **Project**: HEEGNet (Hyperbolic EEG Network for Visual Concept Decoding)  

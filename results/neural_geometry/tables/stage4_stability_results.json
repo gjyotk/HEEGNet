@@ -2,7 +2,7 @@
   "cross_subject_generalization": {
     "train_subject": "sub01",
     "test_subject": "sub08",
-    "poincare_d5_r": 0.5084119327986949,
-    "euclidean_d5_r": 0.5077924095123416
+    "poincare_d5_r": 0.5135567681855225,
+    "euclidean_d5_r": 0.5077922903215358
   }
 }

@@ -109,30 +109,39 @@ class Trainer:
 
         y_true = []
         y_hat = []
+        all_preds = []
 
         with torch.no_grad():
             for batch_ix, (features, y) in enumerate(dataloader):
                 features['inputs'] = features['inputs'].to(dtype=self.dtype_, device=self.device_, non_blocking=True)
                 features['domains'] = features['domains'].to(device=self.device_, non_blocking=True)
                 y = y.to(device=self.device_, non_blocking=True)
-                  
-                features['inputs'] = features['inputs'].to(dtype=self.dtype_, device=self.device_, non_blocking=True)
-                #domain = features['domains'].to(dtype=self.dtype_,device=self.device_)
-                #feature=features['inputs'].unsqueeze(1)
-                pred,_ = model(**features)     
-                #pred = model(features['inputs'])
+                pred, _ = model(**features)     
                 loss += self.loss_fn(pred, y).item()
                 y_true.append(y)
                 y_hat.append(pred.argmax(1))
+                all_preds.append(pred)
 
             if not y_true:
                 raise ValueError("The dataloader produced no batches.")
 
             loss /= len(y_true)
 
-        score = balanced_accuracy_score(torch.cat(y_true).detach().cpu().numpy(), torch.cat(y_hat).detach().cpu().numpy())
+        y_true_cat = torch.cat(y_true)
+        y_hat_cat = torch.cat(y_hat)
+        all_p = torch.cat(all_preds, dim=0)
 
-        return dict(loss=loss, score=score)
+        top1 = (y_hat_cat == y_true_cat).float().mean().item()
+        k_top = min(5, all_p.shape[1])
+        _, topk_idx = torch.topk(all_p, k_top, dim=-1)
+        top5 = torch.any(topk_idx == y_true_cat.unsqueeze(-1), dim=-1).float().mean().item()
+
+        try:
+            score = balanced_accuracy_score(y_true_cat.detach().cpu().numpy(), y_hat_cat.detach().cpu().numpy())
+        except Exception:
+            score = top1
+
+        return dict(loss=loss, score=score, top1=top1, top5=top5)
 
 
     def log_dict(self, dictionary):

@@ -838,13 +838,32 @@ def task_1_5_noise_ceiling(subjects=None, n_boot=200):
             pairwise_rs.append(rdm_corr(rdms_by_sub[subs[i]], rdms_by_sub[subs[j]]))
     inter_sub_r = float(np.mean(pairwise_rs))
 
+    # Robust reliability reporting: All subjects vs Excluding Sub-09 (outlier)
+    sub_df["subject_int"] = subs
+    sub_clean = sub_df[sub_df["subject_int"] != 9]
+    nc_lower_clean = [nc for s, nc in zip(subs, nc_lower_arr) if s != 9]
+    nc_upper_clean = [nc for s, nc in zip(subs, nc_upper_arr) if s != 9]
+
     print("\n  Per-subject reliability:")
-    print(sub_df.to_string(index=False))
-    print(f"\n  Noise ceiling (lower): {nc_lower_arr.mean():.4f} ± {nc_lower_arr.std():.4f}")
-    print(f"  Noise ceiling (upper): {nc_upper_arr.mean():.4f} ± {nc_upper_arr.std():.4f}")
+    print(sub_df.drop(columns=["subject_int"]).to_string(index=False))
+    print(f"\n  Noise ceiling (lower): {nc_lower_arr.mean():.4f} ± {nc_lower_arr.std():.4f} (Median: {np.median(nc_lower_arr):.4f})")
+    print(f"  Noise ceiling (upper): {nc_upper_arr.mean():.4f} ± {nc_upper_arr.std():.4f} (Median: {np.median(nc_upper_arr):.4f})")
+    print(f"  Split-half reliability: Mean = {sub_df['split_half_r'].mean():.4f}, Median = {sub_df['split_half_r'].median():.4f}")
+    print(f"  [Excluding Sub-09 outlier] Split-half: Mean = {sub_clean['split_half_r'].mean():.4f}, Median = {sub_clean['split_half_r'].median():.4f}")
+    print(f"  [Excluding Sub-09 outlier] NC Lower: Mean = {np.mean(nc_lower_clean):.4f}, Median = {np.median(nc_lower_clean):.4f}")
     print(f"  Inter-subject agreement: {inter_sub_r:.4f} (mean pairwise r)")
     print("\n  Distance metric comparison:")
     print(metric_df.to_string(index=False))
+
+    robust_summary = pd.DataFrame([
+        {"cohort": "All 10 Subjects", "split_half_mean": sub_df['split_half_r'].mean(), "split_half_median": sub_df['split_half_r'].median(),
+         "nc_lower_mean": nc_lower_arr.mean(), "nc_lower_median": float(np.median(nc_lower_arr)),
+         "nc_upper_mean": nc_upper_arr.mean(), "nc_upper_median": float(np.median(nc_upper_arr))},
+        {"cohort": "Excluding Sub-09", "split_half_mean": sub_clean['split_half_r'].mean(), "split_half_median": sub_clean['split_half_r'].median(),
+         "nc_lower_mean": float(np.mean(nc_lower_clean)), "nc_lower_median": float(np.median(nc_lower_clean)),
+         "nc_upper_mean": float(np.mean(nc_upper_clean)), "nc_upper_median": float(np.median(nc_upper_clean))}
+    ])
+    robust_summary.to_csv(os.path.join(TAB_DIR, "task1_5_noise_ceiling_robust_summary.csv"), index=False)
 
     # --- Figures ---
     fig, axes = plt.subplots(1, 3, figsize=(16, 5), dpi=200)

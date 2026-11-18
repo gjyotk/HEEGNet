@@ -51,8 +51,10 @@ class BaseDomainBatchNorm(nn.Module, BatchNormTestStatsInterface):
     def __init__(self):
         super().__init__()
         self.batchnorm = torch.nn.ModuleDict()
+        self.test_stats_mode = BatchNormTestStatsMode.BUFFER
 
     def set_test_stats_mode(self, mode : BatchNormTestStatsMode):
+        self.test_stats_mode = mode
         for bn in self.batchnorm.values():
             if isinstance(bn, BatchNormTestStatsInterface):
                 bn.set_test_stats_mode(mode)
@@ -68,7 +70,22 @@ class BaseDomainBatchNorm(nn.Module, BatchNormTestStatsInterface):
         self.batchnorm[str(domain.item())].initrunningstats(X)
 
     def forward_domain_(self, X, domain):
-        res = self.batchnorm[str(domain.item())](X)
+        dom_key = str(domain.item())
+        if dom_key not in self.batchnorm:
+            if hasattr(self, 'add_domain_if_missing'):
+                self.add_domain_if_missing(domain, device=X.device, dtype=X.dtype)
+            else:
+                import warnings
+                avail = list(self.batchnorm.keys())
+                fallback_key = avail[0] if avail else "0"
+                warnings.warn(
+                    f"[BaseDomainBatchNorm] Unseen domain '{dom_key}' passed during eval/forward! "
+                    f"Available domains: {avail}. Falling back to domain '{fallback_key}'. "
+                    f"Ensure domain adaptation (REFIT/SFUDA) is performed for unseen domains.",
+                    UserWarning, stacklevel=2
+                )
+                return self.batchnorm[fallback_key](X)
+        res = self.batchnorm[dom_key](X)
         return res
 
     def forward(self, X, d):
@@ -245,6 +262,11 @@ class DomainSPDBatchNormImpl(BaseDomainBatchNorm):
                  test_stats_mode : BatchNormTestStatsMode = BatchNormTestStatsMode.BUFFER,
                  eta = 1., eta_test = 0.1, domains : Tensor = Tensor([]), **kwargs):
         super().__init__()
+        self.shape = shape
+        self.batchdim = batchdim
+        self.kwargs = kwargs
+        self.eta = eta
+        self.eta_test = eta_test
 
         if dispersion == BatchNormDispersion.VECTOR:
             raise NotImplementedError()
@@ -281,6 +303,25 @@ class DomainSPDBatchNormImpl(BaseDomainBatchNorm):
                             domain)
 
         self.set_test_stats_mode(test_stats_mode)
+
+    def add_domain_if_missing(self, domain, device=None, dtype=None):
+        dom_key = str(domain.item() if isinstance(domain, torch.Tensor) else domain)
+        if dom_key not in self.batchnorm:
+            cls = type(self).domain_bn_cls
+            new_layer = cls(shape=self.shape, batchdim=self.batchdim,
+                            learn_mean=self.learn_mean, learn_std=self.learn_std,
+                            dispersion=self.dispersion, mean=self.mean, std=self.std,
+                            eta=self.eta, eta_test=self.eta_test, **self.kwargs)
+            if device is not None:
+                new_layer.to(device=device, dtype=dtype)
+            elif hasattr(self, 'device_') and self.device_ is not None:
+                new_layer.to(device=self.device_, dtype=getattr(self, 'dtype_', None))
+            new_layer.train(self.training)
+            mode = getattr(self, "test_stats_mode", BatchNormTestStatsMode.BUFFER)
+            new_layer.set_test_stats_mode(mode)
+            dom_tensor = domain if isinstance(domain, torch.Tensor) else torch.tensor(int(dom_key) if str(dom_key).isdigit() else 0)
+            self.add_domain_(new_layer, dom_tensor)
+            self.batchnorm[dom_key] = new_layer
 
 class AdaMomDomainSPDBatchNorm(DomainSPDBatchNormImpl):
     """

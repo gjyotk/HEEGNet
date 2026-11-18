@@ -50,6 +50,14 @@ import zipfile
 import time
 from pathlib import Path
 
+# Self-healing python interpreter resolution: ensure environment with sentence_transformers is used
+CLIMB_PYTHON = Path("/tmp/cv13_climb/.venv/bin/python")
+if CLIMB_PYTHON.exists() and sys.executable != str(CLIMB_PYTHON):
+    try:
+        import sentence_transformers
+    except ImportError:
+        os.execv(str(CLIMB_PYTHON), [str(CLIMB_PYTHON)] + sys.argv)
+
 # Ensure Matplotlib and HuggingFace/Torch cache work in sandbox
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/mpl_cache")
 os.environ.setdefault("TORCH_HOME", "/tmp/torch_cache")

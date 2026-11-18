@@ -1,6 +1,6 @@
 {
   "experiment": "rigorous_methodological_validation_and_heegnet",
-  "frozen_timestamp": "2026-11-18T11:10:09Z",
+  "frozen_timestamp": "2026-11-18T18:56:36Z",
   "random_seed": 42,
   "cohorts": {
     "train_subjects": [
@@ -21,8 +21,8 @@
     ]
   },
   "trial_counts": {
-    "train_trials": 99240,
-    "val_trials": 5000,
+    "train_trials": 198480,
+    "val_trials": 10000,
     "test_trials_per_subject": 16000
   },
   "partitions": {
@@ -38,7 +38,8 @@
     "D": 2,
     "latent_dimension": 48,
     "num_classes": 1654,
-    "optimizer": "Adam",
+    "optimizer_heegnet": "RiemannianAdam",
+    "optimizer_eegnet": "Adam",
     "lr": 0.005,
     "weight_decay": 0.0001,
     "batch_size": 512,
