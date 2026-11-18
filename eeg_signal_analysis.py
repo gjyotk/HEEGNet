@@ -206,6 +206,7 @@ def run_eeg_signal_analysis():
     ch_dict = {name: i for i, name in enumerate(ch_names_ref)}
 
     # Define key ROIs
+    parieto_occ_channels = [ch_dict[c] for c in ["PO3", "PO4", "PO7", "PO8", "O1", "O2"] if c in ch_dict]
     roi_indices = {
         "Occipital (O1, Oz, O2)": [ch_dict[c] for c in ["O1", "Oz", "O2"] if c in ch_dict],
         "Lateral Parieto-Occipital (PO7, PO8)": [ch_dict[c] for c in ["PO7", "PO8"] if c in ch_dict],
@@ -234,18 +235,24 @@ def run_eeg_signal_analysis():
         gfp = np.std(erp, axis=0)
         all_gfps.append(gfp)
 
-        # Detect P100 at Oz (latency in 70–130 ms)
-        oz_idx = ch_dict["Oz"]
-        oz_erp = erp[oz_idx, :]
-        p100_win = slice(27, 34)  # 70 to 140 ms
-        p100_idx = 27 + np.argmax(oz_erp[p100_win])
+        # Detect P100:
+        # Instead of naively searching midline Oz alone (which is near the dipole transition zone in this montage),
+        # identify the early visual sensory latency from Global Field Power (GFP) in the canonical 80–130 ms window,
+        # then report both the positive peak across parieto-occipital channels and the midline Oz value.
+        p100_win = slice(28, 34)  # 80 to 130 ms
+        p100_idx = 28 + np.argmax(gfp[p100_win])
         p100_lat = TIMES[p100_idx] * 1000.0
-        p100_amp = oz_erp[p100_idx]
 
-        # Detect N170 at PO7/PO8 average (latency in 130–210 ms)
+        p100_po_amps = erp[parieto_occ_channels, p100_idx]
+        best_po_idx = np.argmax(p100_po_amps)
+        p100_amp_po = float(p100_po_amps[best_po_idx])
+        p100_po_ch = ch_names_ref[parieto_occ_channels[best_po_idx]]
+        p100_oz_amp = float(erp[ch_dict["Oz"], p100_idx])
+
+        # Detect N170 at PO7/PO8 average (latency in 130–220 ms)
         po_idx = roi_indices["Lateral Parieto-Occipital (PO7, PO8)"]
         po_erp = erp[po_idx, :].mean(axis=0)
-        n170_win = slice(33, 42)  # 130 to 220 ms
+        n170_win = slice(33, 43)  # 130 to 230 ms
         n170_idx = 33 + np.argmin(po_erp[n170_win])
         n170_lat = TIMES[n170_idx] * 1000.0
         n170_amp = po_erp[n170_idx]
@@ -260,16 +267,24 @@ def run_eeg_signal_analysis():
 
         # Evoked vs Trial Residual Noise Variance
         # Residual variance across trials around concept means
-        concept_means = data.mean(axis=1, keepdims=True)
-        residuals = data - concept_means
+        concept_means = data.mean(axis=1)  # (200, 63, 100)
+        residuals = data - concept_means[:, None, :, :]  # (200, 80, 63, 100)
         trial_var = float(np.var(residuals[:, :, :, POSTSTIM_SLICE]))
+
+        # Common stimulus-evoked potential power (grand-average ERP across all concepts)
         evoked_power = float(np.var(erp[:, POSTSTIM_SLICE]))
         evoked_snr = evoked_power / (trial_var + 1e-12)
+
+        # Concept-discriminative signal variance (variance across concept ERPs around grand ERP)
+        concept_signal_var = float(np.var(concept_means[:, :, POSTSTIM_SLICE] - erp[None, :, POSTSTIM_SLICE]))
+        concept_snr = concept_signal_var / (trial_var + 1e-12)
 
         subject_peak_metrics.append({
             "subject": sub,
             "P100_lat_ms": round(p100_lat, 1),
-            "P100_amp_uv": round(float(p100_amp), 3),
+            "P100_amp_uv": round(p100_amp_po, 3),
+            "P100_max_channel": p100_po_ch,
+            "P100_Oz_amp_uv": round(p100_oz_amp, 3),
             "N170_lat_ms": round(n170_lat, 1),
             "N170_amp_uv": round(float(n170_amp), 3),
             "P300_lat_ms": round(p300_lat, 1),
@@ -281,9 +296,12 @@ def run_eeg_signal_analysis():
         subject_snr_metrics.append({
             "subject": sub,
             "evoked_power": round(evoked_power, 6),
+            "concept_signal_var": round(concept_signal_var, 6),
             "trial_noise_var": round(trial_var, 4),
             "evoked_snr_ratio": round(evoked_snr, 6),
             "evoked_snr_x1000": round(evoked_snr * 1000, 2),
+            "concept_snr_ratio": round(concept_snr, 6),
+            "concept_snr_x1000": round(concept_snr * 1000, 2),
         })
 
     all_erps = np.array(all_erps)  # (10, 63, 100)
@@ -491,12 +509,12 @@ def run_eeg_signal_analysis():
     # Bar chart: P100 vs N170 amplitude across subjects
     w = 0.35
     x = np.arange(10)
-    ax_peaks.bar(x - w / 2, df_peaks["P100_amp_uv"], w, label="P100 Amplitude (Oz)", color="darkorange", alpha=0.85)
+    ax_peaks.bar(x - w / 2, df_peaks["P100_amp_uv"], w, label="P100 Max (Parieto-Occipital)", color="darkorange", alpha=0.85)
     ax_peaks.bar(x + w / 2, np.abs(df_peaks["N170_amp_uv"]), w, label="|N170| Amplitude (PO7/8)", color="purple", alpha=0.85)
     ax_peaks.set_xticks(x)
     ax_peaks.set_xticklabels(sub_labels, rotation=40)
     ax_peaks.set_ylabel("Peak Amplitude (μV)", fontweight="bold")
-    ax_peaks.set_title("P100 and |N170| Evoked Peak Magnitude per Subject", fontweight="bold")
+    ax_peaks.set_title("P100 (PO) and |N170| (PO7/8) Peak Magnitude per Subject", fontweight="bold")
     ax_peaks.grid(axis="y", linestyle=":", alpha=0.6)
     ax_peaks.legend(loc="upper right", fontsize=8)
 
@@ -784,6 +802,7 @@ def run_eeg_signal_analysis():
             "amplitude_uv": float(df_peaks["P300_amp_uv"].mean()),
         },
         "evoked_snr_ranking": df_snr.sort_values(by="evoked_snr_ratio", ascending=False)[["subject", "evoked_snr_x1000"]].to_dict(orient="records"),
+        "concept_snr_ranking": df_snr.sort_values(by="concept_snr_ratio", ascending=False)[["subject", "concept_snr_x1000"]].to_dict(orient="records"),
         "alpha_erd_percent": float(erd_summary.loc["Alpha (8–12 Hz)", "mean"]),
         "elapsed_seconds": round(elapsed, 1),
     }

@@ -4,12 +4,12 @@
   "n_channels": 63,
   "sampling_rate_hz": 100,
   "grand_average_p100": {
-    "latency_ms": 74.0,
-    "amplitude_uv": 0.22290000000000001
+    "latency_ms": 110.0,
+    "amplitude_uv": 0.41790000000000005
   },
   "grand_average_n170": {
-    "latency_ms": 194.0,
-    "amplitude_uv": -0.13199999999999998
+    "latency_ms": 205.0,
+    "amplitude_uv": -0.1532
   },
   "grand_average_p300": {
     "latency_ms": 364.0,
@@ -57,6 +57,48 @@
       "evoked_snr_x1000": 10.65
     }
   ],
+  "concept_snr_ranking": [
+    {
+      "subject": 8,
+      "concept_snr_x1000": 20.89
+    },
+    {
+      "subject": 7,
+      "concept_snr_x1000": 18.71
+    },
+    {
+      "subject": 10,
+      "concept_snr_x1000": 18.5
+    },
+    {
+      "subject": 3,
+      "concept_snr_x1000": 18.28
+    },
+    {
+      "subject": 4,
+      "concept_snr_x1000": 17.7
+    },
+    {
+      "subject": 6,
+      "concept_snr_x1000": 17.05
+    },
+    {
+      "subject": 1,
+      "concept_snr_x1000": 16.58
+    },
+    {
+      "subject": 5,
+      "concept_snr_x1000": 16.15
+    },
+    {
+      "subject": 9,
+      "concept_snr_x1000": 15.68
+    },
+    {
+      "subject": 2,
+      "concept_snr_x1000": 15.57
+    }
+  ],
   "alpha_erd_percent": -36.667,
-  "elapsed_seconds": 140.7
+  "elapsed_seconds": 177.4
 }

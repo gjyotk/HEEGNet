@@ -79,7 +79,7 @@ class BaseDomainBatchNorm(nn.Module, BatchNormTestStatsInterface):
                 for domain in du]
         X_out, ixs = zip(*res)
         X_out, ixs = torch.cat(X_out), torch.cat(ixs).flatten()
-        X_normalized[ixs] = X_out
+        X_normalized[ixs] = X_out.to(X_normalized.dtype)
         
         return X_normalized
 
