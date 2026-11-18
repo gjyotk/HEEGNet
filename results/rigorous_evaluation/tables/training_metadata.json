@@ -1,0 +1,28 @@
+{
+  "best_epoch_hyp": 3,
+  "best_val_loss_hyp": 7.3658020889282225,
+  "best_epoch_euc": 5,
+  "best_val_loss_euc": 7.306004190063477,
+  "chance_metrics": {
+    "top1_accuracy": 0.0006045949214026602,
+    "top5_accuracy": 0.003022974607013301,
+    "initial_cross_entropy": 7.4109518755836366,
+    "category_accuracy": 0.3038356320612227
+  },
+  "final_epoch_diagnostics": {
+    "hyp": {
+      "val_top1": 0.0016,
+      "val_top5": 0.0066,
+      "val_cat_acc": 0.315,
+      "active_classes": 323,
+      "normalized_entropy": 0.583953082880013
+    },
+    "euc": {
+      "val_top1": 0.0022,
+      "val_top5": 0.0082,
+      "val_cat_acc": 0.332,
+      "active_classes": 735,
+      "normalized_entropy": 0.7727627593745204
+    }
+  }
+}

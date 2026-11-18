@@ -1,0 +1,48 @@
+{
+  "experiment": "rigorous_methodological_validation_and_heegnet",
+  "frozen_timestamp": "2026-11-18T11:10:09Z",
+  "random_seed": 42,
+  "cohorts": {
+    "train_subjects": [
+      "sub-01",
+      "sub-02",
+      "sub-03"
+    ],
+    "val_subjects": [
+      "sub-04",
+      "sub-05"
+    ],
+    "test_subjects": [
+      "sub-06",
+      "sub-07",
+      "sub-08",
+      "sub-09",
+      "sub-10"
+    ]
+  },
+  "trial_counts": {
+    "train_trials": 99240,
+    "val_trials": 5000,
+    "test_trials_per_subject": 16000
+  },
+  "partitions": {
+    "n_train_concepts": 1654,
+    "n_test_concepts": 200,
+    "test_quarantine_policy": "Strict 100% quarantine: 0 test concepts or trials in training/validation/checkpoints."
+  },
+  "model_configuration": {
+    "chunk_size": 100,
+    "num_electrodes": 63,
+    "F1": 8,
+    "F2": 16,
+    "D": 2,
+    "latent_dimension": 48,
+    "num_classes": 1654,
+    "optimizer": "Adam",
+    "lr": 0.005,
+    "weight_decay": 0.0001,
+    "batch_size": 512,
+    "criterion": "CrossEntropyLoss",
+    "sample_parity_verified": true
+  }
+}

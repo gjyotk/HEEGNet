@@ -20,6 +20,8 @@ class HEEGNet(nn.Module):
                  num_classes: int = 2,
                  kernel_1: int = 64,
                  kernel_2: int = 16,
+                 pool_1: int = 4,
+                 pool_2: int = 8,
                  dropout: float = 0.25,
                  domains = [],
                  domain_adaptation=True,
@@ -38,6 +40,8 @@ class HEEGNet(nn.Module):
         self.num_electrodes = num_electrodes
         self.kernel_1 = kernel_1
         self.kernel_2 = kernel_2
+        self.pool_1 = pool_1
+        self.pool_2 = pool_2
         self.dropout = dropout
         self.domain_adaptation = domain_adaptation
         self.manifold = CustomLorentz()
@@ -55,7 +59,7 @@ class HEEGNet(nn.Module):
                                  padding=(0, 0),
                                  groups=self.F1,
                                  bias=False), nn.BatchNorm2d(self.F1 * self.D, momentum=0.01, affine=True, eps=1e-3),
-            nn.ELU(), nn.AvgPool2d((1, 4), stride=4), nn.Dropout(p=dropout))
+            nn.ELU(), nn.AvgPool2d((1, self.pool_1), stride=self.pool_1), nn.Dropout(p=dropout))
 
         self.block2 = nn.Sequential(
             nn.Conv2d(self.F1 * self.D,
@@ -67,7 +71,7 @@ class HEEGNet(nn.Module):
             nn.Conv2d(self.F1 * self.D, self.F2, 1, padding=(0, 0), groups=1,bias=False, stride=1),
             nn.BatchNorm2d(self.F2, momentum=0.01, affine=True, eps=1e-3), 
             nn.ELU(), 
-            nn.AvgPool2d((1, 8), stride=8),
+            nn.AvgPool2d((1, self.pool_2), stride=self.pool_2),
             nn.Dropout(p=dropout))
     
 
@@ -86,7 +90,7 @@ class HEEGNet(nn.Module):
                                           eta=1., eta_test=.1, dtype=self.dtype_, device=self.device_)
 
         self.elu = LorentzeLU(self.manifold)
-        self.avpool = LorentzAvgPool2d(self.manifold, (1, 8), stride=8)
+        self.avpool = LorentzAvgPool2d(self.manifold, (1, self.pool_2), stride=self.pool_2)
         self.lmlp = LorentzMLR(self.manifold,self.feature_dim()+1, num_classes) #385,369,
 
     def bn_dim(self):
