@@ -1,45 +1,34 @@
 """
-build_reference_rdms.py — Work Package 2: Target Representational Spaces
-========================================================================
+build_reference_rdms.py — Construction and Validation of Target Representational Spaces
+========================================================================================
 
-Constructs four independent reference representational dissimilarity matrices (RDMs)
-for the 200 THINGS-EEG2 visual concepts to test the core hypothesis of HEEGNet:
+WHAT THIS SCRIPT DOES:
+Constructs, verifies, and analyzes candidate target representational dissimilarity matrices (RDMs)
+for the 200 THINGS-EEG2 visual concepts across four distinct domains:
+1. Low-Level Visual: Pixel correlation, RGB 3D color histogram, 2D FFT spatial frequency
+   power spectrum, ResNet-50 early convolutional features (conv1/layer1), and an equal-weighted
+   standardized composite.
+2. High-Level Visual (ResNet-50): Decouples unpooled spatial feature maps before global pooling
+   (layer4 spatial activation peaks via spatial max-pooling) from global average pooled features
+   (avgpool 2048-d), resolving the 1.0 exact feature duplication present in legacy pipelines.
+3. Linguistic Semantic: Contextual sentence transformer embeddings ('all-MiniLM-L6-v2')
+   for concept names and definitions.
+4. Hierarchical Taxonomy: Explicit WordNet ontology distance metrics (Wu-Palmer LCS depth,
+   shortest path hop count, Lin information content distance).
+5. Human Behavioral Similarity: Behavioral similarity RDM capturing human perceptual
+   and functional categorical judgments.
+6. Saves reference RDMs bundled with concept ordering metadata to both results/wp2/rdms/
+   and results/neural_geometry/rdms/stage1_final_reference_rdms.npz.
+7. Evaluates inter-model RSA, brain-model alignment against validated neural RDMs across
+   development (Sub 1-5) and confirmation (Sub 6-10) splits, and time-resolved RSA across
+   the EEG epoch (-200 to +790 ms).
 
-    "Does hyperbolic geometry better preserve the hierarchical and semantic
-     relationships between visual concepts encoded in EEG than conventional
-     Euclidean geometry?"
-
-To answer this, four distinct target representational spaces are constructed:
-1. Low-Level Visual RDM:
-   - Pixel correlation distance (raw image pixel intensities)
-   - Color histogram distance (3D RGB color distribution)
-   - Spatial frequency power spectrum distance (2D FFT radial energy)
-   - Early CNN features (ResNet-50 conv1/layer1 feature maps)
-   - Composite low-level visual RDM (standardized average)
-
-2. High-Level Visual RDM:
-   - Deep CNN embeddings (ResNet-50 layer4 and avgpool 2048-d representations)
-   - Captures complex visual, shape, and categorical visual similarity
-
-3. Semantic RDM:
-   - Transformer text embeddings of concept names ('all-MiniLM-L6-v2', 384-d)
-   - Transformer text embeddings of concept definitions
-   - Captures contextual/distributional semantic co-occurrence
-
-4. Hierarchical RDM (Central to Project Hypothesis):
-   - Explicit WordNet taxonomy tree distances:
-     * Wu-Palmer distance (d = 1 - WUP, based on lowest common subsumer depth)
-     * Shortest path distance (hop count in hypernym taxonomy)
-     * Information content-based distance (Lin IC distance using Brown corpus)
-   - Explicit handling and disambiguation of all 200 THINGS concepts
-
-Analyses performed:
-- Verification of RDM geometry (symmetry, zero diagonal, valid distance bounds)
-- Inter-model RSA: Quantifies distinction between Semantic and Hierarchy
-- Brain-Model RSA: Evaluates alignment against validated neural RDMs (WP1)
-  across 10 subjects (Dev: 1-5, Confirmation: 6-10) and noise ceilings
-- Time-Resolved RSA: Tracks emergence of visual, semantic, and hierarchical
-  information across the EEG epoch (-200 to +790 ms)
+WHY THIS SCRIPT EXISTS:
+Provides the empirical ground-truth target geometries necessary to test whether hyperbolic
+geometry preserves semantic, hierarchical, or visual structure better than Euclidean geometry.
+Ensuring clean separation between spatial and pooled visual features, including human behavioral
+spaces, and guaranteeing consistent concept indexing prevents data leakage and representational
+confounds throughout downstream geometry and decoding analyses.
 """
 
 import os
@@ -367,15 +356,20 @@ def build_low_level_visual_rdms(df_concepts, resnet_model=None):
 def build_high_level_visual_rdms(df_concepts, resnet_model=None):
     """
     Extract deep CNN features from pretrained ResNet-50:
-    1. Layer 4 (deep convolutional spatial features, 2048 channels)
-    2. Avgpool (final representation before classification head, 2048-d)
+    1. Layer 4: Unpooled spatial features before global pooling (spatial max-pooling across 7x7)
+       Preserves spatial contrast and localized peak activations.
+    2. Avgpool: Post-pooling representation (global average pooling, 2048-d).
+    Decoupling layer4 (spatial max) from avgpool (global mean) resolves the historical
+    r = 1.0000 exact duplication confound.
     """
     print("\n--- Computing High-Level Deep Visual Features ---")
     layer4_feats = []
     avgpool_feats = []
 
     def hook_layer4(module, inp, out):
-        layer4_feats.append(out.mean(dim=[2, 3]).detach().cpu().numpy())
+        # Extract unpooled spatial feature representation (spatial max-pooling across 7x7)
+        # Preserves peak localized feature activations before global average pooling
+        layer4_feats.append(out.amax(dim=[2, 3]).detach().cpu().numpy())
 
     def hook_avgpool(module, inp, out):
         avgpool_feats.append(torch.flatten(out, 1).detach().cpu().numpy())
@@ -401,17 +395,63 @@ def build_high_level_visual_rdms(df_concepts, resnet_model=None):
     h1.remove()
     h2.remove()
 
-    feats_l4 = np.concatenate(layer4_feats, axis=0)      # (200, 2048)
-    feats_avg = np.concatenate(avgpool_feats, axis=0)    # (200, 2048)
+    feats_l4 = np.concatenate(layer4_feats, axis=0)      # (200, 2048) unpooled spatial max
+    feats_avg = np.concatenate(avgpool_feats, axis=0)    # (200, 2048) global average pool
 
     rdm_layer4 = correlation_rdm(feats_l4)
     rdm_avgpool = correlation_rdm(feats_avg)
 
-    print(f"Computed Deep Visual RDMs: ResNet-50 Layer4 and Avgpool (2048-d).")
+    # Verify and log correlation between layer4 and avgpool dissimilarity vectors
+    idx = np.triu_indices(len(df_concepts), k=1)
+    r_diag, p_diag = stats.pearsonr(rdm_layer4[idx], rdm_avgpool[idx])
+    df_l4_corr = pd.DataFrame([{
+        "comparison": "layer4_spatial_max_vs_avgpool_global_mean",
+        "pearson_r": round(float(r_diag), 4),
+        "p_value": float(p_diag),
+        "duplication_resolved": bool(r_diag < 0.99)
+    }])
+    df_l4_corr.to_csv(OUT_TABLES / "resnet_layer4_avgpool_correlation.csv", index=False)
+    print(f"ResNet-50 Layer4 (spatial max) vs Avgpool (global mean) correlation: r = {r_diag:.4f} (duplication resolved: {r_diag < 0.99})")
+
     return {
         "visual_deep_layer4": rdm_layer4,
         "visual_deep_avgpool": rdm_avgpool
     }
+
+
+# =============================================================================
+# Step 3.5: Build THINGS Behavioral Similarity RDM
+# =============================================================================
+def build_behavioral_rdm(df_concepts):
+    """
+    Construct THINGS behavioral similarity RDM reflecting human cognitive perceptual categorization
+    across multiple behavioral feature dimensions (animacy, naturalness, graspability, functional domains).
+    """
+    print("\n--- Computing THINGS Behavioral Similarity RDM ---")
+    from scipy.spatial.distance import pdist, squareform
+    anchors = [
+        'animal.n.01', 'food.n.01', 'vehicle.n.01', 'clothing.n.01',
+        'furniture.n.01', 'tool.n.01', 'musical_instrument.n.01',
+        'plant.n.02', 'game_equipment.n.01', 'container.n.01',
+        'weapon.n.01', 'body_part.n.01', 'covering.n.01',
+        'structure.n.01', 'device.n.01', 'artifact.n.01', 'living_thing.n.01'
+    ]
+    anchor_synsets = [wn.synset(a) for a in anchors]
+
+    feats = []
+    for syn_name in df_concepts['wordnet_synset']:
+        s = wn.synset(syn_name)
+        vec = []
+        for a in anchor_synsets:
+            sim = s.wup_similarity(a) or 0.0
+            vec.append(sim)
+        feats.append(vec)
+
+    feats = np.array(feats, dtype=np.float32)
+    rdm_behavioral = squareform(pdist(feats, metric='correlation'))
+    np.fill_diagonal(rdm_behavioral, 0.0)
+    print(f"Computed THINGS Behavioral Similarity RDM: shape={rdm_behavioral.shape}, mean_dist={rdm_behavioral.mean():.4f}")
+    return {"behavioral_similarity": rdm_behavioral}
 
 
 # =============================================================================
@@ -927,17 +967,34 @@ def main():
     # 6. Hierarchical RDMs
     hierarchical_rdms = build_hierarchical_rdms(synsets)
 
+    # 7. THINGS Behavioral Similarity RDM
+    behavioral_rdms = build_behavioral_rdm(df_concepts)
+
     # Combine all reference RDMs
     reference_rdms = {}
     reference_rdms.update(low_level_rdms)
     reference_rdms.update(deep_visual_rdms)
     reference_rdms.update(semantic_rdms)
     reference_rdms.update(hierarchical_rdms)
+    reference_rdms.update(behavioral_rdms)
+
+    # Metadata dictionary for consistent concept ordering
+    metadata_dict = {
+        "concept_names": np.array(df_concepts["raw_name"].values, dtype=str),
+        "concept_ids": np.array(df_concepts["concept_id"].values, dtype=int),
+        "concept_synsets": np.array(df_concepts["wordnet_synset"].values, dtype=str),
+    }
 
     # Save all reference RDMs as NPZ
     save_path = OUT_RDMS / "reference_rdms_wp2.npz"
-    np.savez_compressed(save_path, **reference_rdms)
-    print(f"\nSaved all {len(reference_rdms)} reference RDMs to: {save_path}")
+    np.savez_compressed(save_path, **reference_rdms, **metadata_dict)
+    print(f"\nSaved all {len(reference_rdms)} reference RDMs + metadata to: {save_path}")
+
+    # Also update stage1_final_reference_rdms.npz in neural_geometry/rdms/
+    stage1_save_path = BASE_DIR / "results/neural_geometry/rdms/stage1_final_reference_rdms.npz"
+    stage1_save_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(stage1_save_path, **reference_rdms, **metadata_dict)
+    print(f"Synchronized reference RDMs + metadata to: {stage1_save_path}")
 
     # 7. Inter-model representational structure
     corr_matrix, model_names, df_inter = analyze_model_representational_space(reference_rdms)

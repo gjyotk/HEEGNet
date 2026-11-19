@@ -1,26 +1,30 @@
 #!/usr/bin/env python3
 """
-rigorous_methodological_validation_and_heegnet.py
+rigorous_methodological_validation_and_heegnet.py — Historical Baseline Experiment
+===================================================================================
 
-Comprehensive Methodological Overhaul, Frozen Training Protocol, & Training Diagnostics:
-1. Change 1: Fix and Freeze Training Protocol
-   - Development Cohort: Sub-01, Sub-02, Sub-03 (1,654 training classes, 2 sessions/subject).
-   - Validation Cohort: Sub-04, Sub-05 (Explicit held-out subjects, 1,654 classes).
-   - Held-Out Test Cohort: Sub-06 through Sub-10 (100% quarantined until final evaluation).
-   - Saved exact train/val/test splits to 'frozen_training_protocol.json'.
-   - Record random seed (42), checkpoints, model configuration, and sample parity verification.
-   - Verified that both models receive identical training batches and sample order via single DataLoader loop.
+STATUS: SUPERSEDED HISTORICAL BASELINE EXPERIMENT.
+(For the current primary experimental implementation with multi-seed training,
+4-head architecture ablation, WordNet prototype initialization, and Holm-Bonferroni
+correction, refer to `train_heegnet_and_evaluate_geometry.py` and `aggregate_cv_results.py`).
 
-2. Change 2: Rigorous Investigation of 1,654-Class Training Performance & Diagnostics
-   - Chance Baseline: Top-1 = 1/1654 = 0.0605%; Top-5 = 5/1654 = 0.3023%; Chance Loss = ln(1654) = 7.4109.
-   - Comprehensive Diagnostics tracked per epoch:
-     * Training and validation cross-entropy loss.
-     * Top-1 training and validation accuracy.
-     * Top-5 training and validation accuracy.
-     * Per-class prediction frequency, active classes count, max frequency, and normalized Shannon entropy.
-     * Confusion between concepts belonging to related superordinate categories (Animal, Food, Vehicle, Clothing, etc.).
-     * Category accuracy versus empirical chance category baseline (~30.5%).
-     * Learning curves across epochs with separately recorded best epochs selected strictly by validation loss.
+WHAT THIS SCRIPT DOES:
+Preserves the historical, single-seed (seed 42), 3-subject training protocol
+(Sub-01 to 03 for training, Sub-04 to 05 for validation, Sub-06 to 10 for held-out testing)
+that established the original baseline comparison between HEEGNet and EuclideanEEGNet:
+1. Stage 4 leak-free embedding benchmark on development (Sub 1-5) and confirmation (Sub 6-10) splits.
+2. Matched 1,654-class training loop and training diagnostics:
+   - Tracks cross-entropy loss, top-1 accuracy (chance = 0.06%), top-5 accuracy (chance = 0.30%).
+   - Tracks normalized prediction entropy, active classes count, and superordinate category accuracy.
+   - Monitors multicollinearity (VIF < 1.3 across reference spaces).
+3. Evaluates held-out subject-level decoding and representation alignment on Sub-06 to 10.
+4. Generates historical Figures 13, 14, 15, and 16 and associated result tables.
+
+WHY THIS SCRIPT EXISTS & WHY IT IS RETAINED SEPARATELY:
+This script represents the foundational transitional milestone that resolved early circularity
+and test-set leakage. It is retained intact as a frozen historical baseline so that all
+initial benchmark tables, figures, and reports remain 100% auditable and reproducible without
+interfering with or contaminating the modern multi-seed CV pipeline.
 """
 
 import os

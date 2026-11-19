@@ -1,42 +1,24 @@
 """
 neural_geometry_and_embeddings.py
 =================================
-Four-stage investigation of Neural Representational Geometry & Embeddings:
+Independent Investigation of Neural Representational Geometry, Gromov Hyperbolicity,
+Synthetic Tree Calibration, and Matched Hyperbolic vs. Euclidean Embeddings (Stages 1–4).
 
-Stage 1: Finalise Reference RDMs
-- Standardize 200-concept ordering (0..199 matching tot_img_number 1..200).
-- Keep low-level visual, mid-level visual, deep visual, semantic, and hierarchical RDMs separate.
-- Store both correlation dissimilarities and mathematically valid metric spaces (angular distance).
-- Save exact RDM matrices and metadata.
-
-Stage 2: Establish Neural Representational Geometry
-- Primary neural reference: 24 occipital-parietal channels, 50–300 ms.
-- Secondary neural references: 3 occipital channels (O1/Oz/O2, 100–290 ms), 24ch (100–290 ms), 24ch (170–210 ms N170 peak).
-- Compute neural RDMs independently for each subject (N=10) with valid metric properties.
-- Evaluate within-session (split-half 10/10) and cross-session (6 session pairs) reliability.
-- Quantify subject-by-subject reproducibility of the 190 ms hierarchy alignment.
-
-Stage 3: Test the Geometry of the Neural RDM Itself
-- Demonstrate metric validity: Angular distance vs Correlation distance triangle inequality violations.
-- Gromov delta-hyperbolicity: 200,000 quadruplet four-point condition evaluation across subjects, sessions, and time windows.
-- Tree-likeness quantification: Cophenetic correlation and tree residual stress.
-- Direct geometric test: Euclidean vs Hyperbolic embedding distortion of the neural RDM.
-- Stability of neural hyperbolicity across subjects, sessions, and time course.
-
-Stage 4: Compare Euclidean and Hyperbolic Embeddings
-- Matched embeddings across dimensions d in {2, 5, 10}:
-  1. Neural RDM (Primary 50–300 ms and 190 ms peak)
-  2. Low-level visual RDM (Composite)
-  3. Deep visual RDM (ResNet-50 Avgpool)
-  4. Semantic RDM (MiniLM Definitions)
-  5. WordNet Hierarchy RDM (Wu-Palmer)
-- Matched optimization budget (600 epochs Adam, lr=0.03, seed=42, relative stress loss).
-- Comprehensive evaluation:
-  * Reconstruction distortion (relative error)
-  * Rank preservation (Spearman rho)
-  * Cross-subject and cross-session stability
-  * Alignment with independent neural RDM
-  * Alignment with semantic and hierarchical reference RDMs
+What this file does and why:
+----------------------------
+This script serves as the independent representational geometry investigation (Stages 1–4)
+separated completely from network training to maintain scientific and methodological integrity:
+- Stage 0: Synthetic Tree & Noise Calibration (verifies whether the optimization pipeline can
+  recover tree vs. flat structure under empirical EEG noise conditions).
+- Stage 1: Standardises reference RDMs across 200 concepts (visual hierarchy, MiniLM semantics,
+  WordNet taxonomy).
+- Stage 2: Computes subject-specific neural RDMs (primary 50-300 ms, 190 ms N170 peak) with
+  mathematically valid metric properties (angular distance) and split-half reliability.
+- Stage 3: Evaluates the metric space of neural representations directly via triangle inequality,
+  standardized Gromov delta-hyperbolicity with concept bootstrapping and distance-matched flat nulls.
+- Stage 4: Fits matched Poincaré vs. Euclidean embeddings across multiple seeds (42, 123, 999)
+  and dimensions {2, 5, 10}, tracking convergence curves, reconstruction distortion, and leak-free
+  subject-level generalization to held-out confirmation brains (Sub-06–10).
 """
 
 import os
@@ -173,12 +155,17 @@ def test_triangle_inequality(D, n_triplets=100000, seed=42):
 
 def compute_gromov_hyperbolicity(D, n_quadruplets=200000, seed=42):
     """
-    Compute Gromov 4-point delta-hyperbolicity:
+    Standardized Gromov 4-point delta-hyperbolicity (Change C):
     For quadruplet (x, y, z, w):
       S1 = d(x, y) + d(z, w)
       S2 = d(x, z) + d(y, w)
       S3 = d(x, w) + d(y, z)
     Sort S_(1) >= S_(2) >= S_(3). Defect delta = (S_(1) - S_(2)) / 2.
+    Standardized metrics:
+      - mean_delta: mean(delta)
+      - median_delta: median(delta)
+      - normalized_delta: median(delta) / diameter(D)
+      - relative_delta: 2 * max(delta) / diameter(D)
     """
     np.random.seed(seed)
     n = D.shape[0]
@@ -193,19 +180,46 @@ def compute_gromov_hyperbolicity(D, n_quadruplets=200000, seed=42):
     s3 = D[x, w] + D[y, z]
     
     sums = np.column_stack([s1, s2, s3])
-    sums.sort(axis=1) # col 0 = min, col 1 = mid, col 2 = max
+    sums.sort(axis=1)  # col 0 = min, col 1 = mid, col 2 = max
     deltas = (sums[:, 2] - sums[:, 1]) / 2.0
     diam = float(D.max())
     max_d = float(deltas.max())
-    rel_delta = (2.0 * max_d) / diam if diam > 0 else 0.0
+    med_d = float(np.median(deltas))
+    norm_delta = float(med_d / (diam + 1e-8))
+    rel_delta = float((2.0 * max_d) / (diam + 1e-8)) if diam > 0 else 0.0
 
     return {
         "mean_delta": float(deltas.mean()),
+        "median_delta": med_d,
         "p95_delta": float(np.percentile(deltas, 95)),
         "max_delta": max_d,
         "diameter": diam,
-        "relative_delta": float(rel_delta),
+        "normalized_delta": norm_delta,
+        "relative_delta": rel_delta,
         "n_valid_quadruplets": len(deltas)
+    }
+
+
+def compute_gromov_bootstrapped(D, n_quadruplets=50000, n_boot=200, seed=42):
+    """
+    Bootstrap over concepts (resample rows/columns with replacement)
+    to compute subject- and concept-level uncertainty estimates (Change C).
+    Returns mean, std (SEM), and 95% bootstrap confidence interval for normalized_delta.
+    """
+    rng = np.random.RandomState(seed)
+    n = D.shape[0]
+    boot_deltas = []
+    for _ in range(n_boot):
+        idx = rng.choice(n, size=n, replace=True)
+        D_boot = D[np.ix_(idx, idx)]
+        res = compute_gromov_hyperbolicity(D_boot, n_quadruplets=n_quadruplets, seed=int(rng.randint(0, 100000)))
+        boot_deltas.append(res["normalized_delta"])
+    boot_deltas = np.array(boot_deltas)
+    return {
+        "boot_norm_delta_mean": float(boot_deltas.mean()),
+        "boot_norm_delta_sem": float(boot_deltas.std()),
+        "boot_norm_delta_ci_lo": float(np.percentile(boot_deltas, 2.5)),
+        "boot_norm_delta_ci_hi": float(np.percentile(boot_deltas, 97.5))
     }
 
 
@@ -582,8 +596,8 @@ def stage_3_test_neural_geometry(stage2_neural_bundle, ref_rdms, df_rel, sub_ses
     ])
     df_axioms.to_csv(OUT_TABLES / "stage3_metric_axiom_verification.csv", index=False)
 
-    # 2. Gromov Delta-Hyperbolicity Benchmarks
-    print("\n--- 2. Gromov Delta-Hyperbolicity Benchmarks (200,000 Quadruplets) ---")
+    # 2. Gromov Delta-Hyperbolicity Benchmarks (Standardized definition & bootstrap CIs)
+    print("\n--- 2. Gromov Delta-Hyperbolicity Benchmarks (Standardized with Bootstrap CIs) ---")
     benchmark_spaces = {
         "WordNet Tree Path (Pure Tree)": ref_rdms["hierarchy_path"],
         "WordNet Hierarchy (Wu-Palmer)": ref_rdms["hierarchy_wup"],
@@ -594,55 +608,76 @@ def stage_3_test_neural_geometry(stage2_neural_bundle, ref_rdms, df_rel, sub_ses
         "Low-Level Visual (Composite)": ref_rdms["visual_low_level_composite"]
     }
 
-    # Synthetic geometric controls: Euclidean R^2, Euclidean R^50, Spherical S^2
+    # Synthetic geometric controls: Distance-Matched Flat Null (Primary Control), Euclidean R^2, Spherical S^2
     np.random.seed(42)
+    pts_flat48 = np.random.randn(N_CONCEPTS, 48)
+    d_flat48 = squareform(pdist(pts_flat48, metric="euclidean"))
+    d_flat48 *= np.mean(grand_ang) / (np.mean(d_flat48) + 1e-8)
+
     pts_r2 = np.random.randn(N_CONCEPTS, 2)
-    d_r2 = np.linalg.norm(pts_r2[:, None, :] - pts_r2[None, :, :], axis=-1)
-    pts_r50 = np.random.randn(N_CONCEPTS, 50)
-    d_r50 = np.linalg.norm(pts_r50[:, None, :] - pts_r50[None, :, :], axis=-1)
-    
+    d_r2 = squareform(pdist(pts_r2, metric="euclidean"))
+    d_r2 *= np.mean(grand_ang) / (np.mean(d_r2) + 1e-8)
+
     pts_s2 = np.random.randn(N_CONCEPTS, 3)
     pts_s2 = pts_s2 / np.linalg.norm(pts_s2, axis=-1, keepdims=True)
     d_s2 = np.arccos(np.clip(pts_s2 @ pts_s2.T, -1.0, 1.0))
+    d_s2 *= np.mean(grand_ang) / (np.mean(d_s2) + 1e-8)
 
-    benchmark_spaces["Synthetic Flat Euclidean (R^2)"] = d_r2
-    benchmark_spaces["Synthetic High-D Euclidean (R^50)"] = d_r50
+    benchmark_spaces["Distance-Matched Flat Null (R^48)"] = d_flat48
+    benchmark_spaces["Synthetic 2D Euclidean (R^2)"] = d_r2
     benchmark_spaces["Synthetic Spherical (S^2)"] = d_s2
 
     gromov_records = []
     for label, D_mat in benchmark_spaces.items():
-        g_res = compute_gromov_hyperbolicity(D_mat, n_quadruplets=200000)
+        g_res = compute_gromov_hyperbolicity(D_mat, n_quadruplets=100000, seed=42)
         coph_corr, tree_stress = compute_tree_likeness(D_mat)
+        boot_res = compute_gromov_bootstrapped(D_mat, n_quadruplets=20000, n_boot=100, seed=42)
         gromov_records.append({
             "space": label,
             "mean_delta": g_res["mean_delta"],
+            "median_delta": g_res["median_delta"],
             "p95_delta": g_res["p95_delta"],
             "max_delta": g_res["max_delta"],
             "diameter": g_res["diameter"],
+            "normalized_delta": g_res["normalized_delta"],
             "relative_delta": g_res["relative_delta"],
+            "boot_norm_delta_mean": boot_res["boot_norm_delta_mean"],
+            "boot_norm_delta_sem": boot_res["boot_norm_delta_sem"],
+            "boot_ci_lo": boot_res["boot_ci_lo"],
+            "boot_ci_hi": boot_res["boot_ci_hi"],
             "tree_cophenetic_corr": coph_corr,
             "tree_stress": tree_stress
         })
-        print(f"  {label:<38}: delta_rel = {g_res['relative_delta']:.4f}, mean_delta = {g_res['mean_delta']:.4f}, tree_coph = {coph_corr:.4f}")
+        print(f"  {label:<38}: delta_norm = {g_res['normalized_delta']:.4f} "
+              f"[{boot_res['boot_ci_lo']:.4f}, {boot_res['boot_ci_hi']:.4f}], tree_coph = {coph_corr:.4f}")
 
     df_gromov = pd.DataFrame(gromov_records)
     df_gromov.to_csv(OUT_TABLES / "stage3_gromov_hyperbolicity_benchmarks.csv", index=False)
 
-    # 3. Subject-level and Session-level Stability of Neural Hyperbolicity
-    print("\n--- 3. Stability of Neural Hyperbolicity Across Subjects & Sessions ---")
+    # 3. Subject-level and Session-level Stability of Neural Hyperbolicity vs. Distance-Matched Flat Null
+    print("\n--- 3. Stability of Neural Hyperbolicity vs. Distance-Matched Flat Null Across 10 Subjects ---")
     sub_gromov = []
     for s in range(1, 11):
         d_sub = stage2_neural_bundle[f"sub{s:02d}_primary_ang"]
-        g_sub = compute_gromov_hyperbolicity(d_sub, n_quadruplets=100000)
+        g_sub = compute_gromov_hyperbolicity(d_sub, n_quadruplets=50000, seed=42 + s)
+
+        # Distance-matched flat null for this subject
+        pts_s_null = np.random.RandomState(42 + s).randn(N_CONCEPTS, 48)
+        d_s_null = squareform(pdist(pts_s_null, metric="euclidean"))
+        d_s_null *= np.mean(d_sub) / (np.mean(d_s_null) + 1e-8)
+        g_s_null = compute_gromov_hyperbolicity(d_s_null, n_quadruplets=50000, seed=42 + s)
         
         # Session deltas for this subject
         ses_deltas = []
         for ses_rdm in sub_session_ang[s]:
-            g_ses = compute_gromov_hyperbolicity(ses_rdm, n_quadruplets=50000)
-            ses_deltas.append(g_ses["relative_delta"])
+            g_ses = compute_gromov_hyperbolicity(ses_rdm, n_quadruplets=25000, seed=42 + s)
+            ses_deltas.append(g_ses["normalized_delta"])
 
         sub_gromov.append({
             "subject": f"sub{s:02d}",
+            "normalized_delta_neural": g_sub["normalized_delta"],
+            "normalized_delta_flat_null": g_s_null["normalized_delta"],
+            "hyperbolic_tree_advantage": g_s_null["normalized_delta"] - g_sub["normalized_delta"],
             "relative_delta": g_sub["relative_delta"],
             "mean_delta": g_sub["mean_delta"],
             "session_delta_mean": float(np.mean(ses_deltas)),
@@ -688,20 +723,14 @@ def stage_3_test_neural_geometry(stage2_neural_bundle, ref_rdms, df_rel, sub_ses
 
 
 # =============================================================================
-# STAGE 4: COMPARE EUCLIDEAN AND HYPERBOLIC EMBEDDINGS
+# STAGE 4: COMPARE EUCLIDEAN AND HYPERBOLIC EMBEDDINGS (MULTI-SEED & GENERALIZATION)
 # =============================================================================
-def stage_4_compare_embeddings(stage2_neural_bundle, ref_rdms):
+def stage_4_compare_embeddings(stage2_neural_bundle, ref_rdms, seeds=(42, 123, 999)):
     print("\n" + "=" * 80)
-    print("STAGE 4: COMPARE EUCLIDEAN AND HYPERBOLIC EMBEDDINGS")
+    print("STAGE 4: COMPARE EUCLIDEAN AND HYPERBOLIC EMBEDDINGS (MULTI-SEED & GENERALIZATION)")
     print("=" * 80)
 
-    # Five representational targets:
-    # 1. Neural RDM (Primary 50-300 ms Grand Angular)
-    # 2. Low-Level Visual RDM (Composite)
-    # 3. Deep Visual RDM (ResNet-50 Avgpool)
-    # 4. Semantic RDM (MiniLM Definitions)
-    # 5. WordNet Hierarchy RDM (Wu-Palmer)
-    # Strictly disjoint subject sets for leak-free Stage 4 generalization:
+    # Strictly disjoint subject sets for leak-free Stage 4 generalization (Change D):
     # Development brain: Subjects 1-5 (used exclusively for fitting)
     # Confirmation brain: Subjects 6-10 (used exclusively for out-of-sample testing)
     dev_brain = np.mean([stage2_neural_bundle[f"sub{s:02d}_primary_ang"] for s in range(1, 6)], axis=0)
@@ -719,70 +748,134 @@ def stage_4_compare_embeddings(stage2_neural_bundle, ref_rdms):
     semantic_ground_truth = ref_rdms["semantic_definitions"]
 
     dims = [2, 5, 10]
-    records = []
+    multi_seed_records = []
+    subject_alignment_records = []
     trained_embeddings = {}
 
-    print("Fitting matched Poincaré and Euclidean embeddings across all 6 targets...")
+    print(f"Fitting matched Poincaré and Euclidean embeddings across {len(targets)} targets and seeds {seeds}...")
     for target_name, D_target in targets.items():
         tri_true = D_target[TRIU].clip(min=1e-3)
 
         for d in dims:
-            t0 = time.time()
-            # Hyperbolic (Poincaré)
-            coords_h, dist_h = fit_poincare(D_target, dim=d, lr=0.03, n_epochs=600, seed=42)
-            # Euclidean
-            coords_e, dist_e = fit_euclidean(D_target, dim=d, lr=0.03, n_epochs=600, seed=42)
+            for seed in seeds:
+                # Hyperbolic (Poincaré)
+                coords_h, dist_h = fit_poincare(D_target, dim=d, lr=0.03, n_epochs=500, seed=seed)
+                # Euclidean
+                coords_e, dist_e = fit_euclidean(D_target, dim=d, lr=0.03, n_epochs=500, seed=seed)
 
-            trained_embeddings[f"{target_name}_hyp_{d}"] = (coords_h, dist_h)
-            trained_embeddings[f"{target_name}_euc_{d}"] = (coords_e, dist_e)
+                # Store seed 42 models for figure visualization
+                if seed == 42:
+                    trained_embeddings[f"{target_name}_hyp_{d}"] = (coords_h, dist_h)
+                    trained_embeddings[f"{target_name}_euc_{d}"] = (coords_e, dist_e)
 
-            # 1. Reconstruction Distortion
-            distort_h = float(np.mean(np.abs(dist_h[TRIU] - tri_true) / tri_true))
-            distort_e = float(np.mean(np.abs(dist_e[TRIU] - tri_true) / tri_true))
+                # 1. Reconstruction Distortion
+                distort_h = float(np.mean(np.abs(dist_h[TRIU] - tri_true) / tri_true))
+                distort_e = float(np.mean(np.abs(dist_e[TRIU] - tri_true) / tri_true))
 
-            # 2. Rank preservation
-            rho_h, _ = rdm_corr(dist_h, D_target, "spearman")
-            rho_e, _ = rdm_corr(dist_e, D_target, "spearman")
+                # 2. Rank preservation
+                rho_h, _ = rdm_corr(dist_h, D_target, "spearman")
+                rho_e, _ = rdm_corr(dist_e, D_target, "spearman")
 
-            # 3. Alignment with independent confirmation brain
-            r_brain_h, _ = rdm_corr(dist_h, confirmation_brain, "pearson")
-            r_brain_e, _ = rdm_corr(dist_e, confirmation_brain, "pearson")
+                # 3. Alignment with confirmation grand-average brain
+                r_brain_h, _ = rdm_corr(dist_h, confirmation_brain, "pearson")
+                r_brain_e, _ = rdm_corr(dist_e, confirmation_brain, "pearson")
 
-            # 4. Alignment with hierarchy ground truth
-            r_hie_h, _ = rdm_corr(dist_h, hierarchy_ground_truth, "pearson")
-            r_hie_e, _ = rdm_corr(dist_e, hierarchy_ground_truth, "pearson")
+                # 4. Alignment with hierarchy ground truth
+                r_hie_h, _ = rdm_corr(dist_h, hierarchy_ground_truth, "pearson")
+                r_hie_e, _ = rdm_corr(dist_e, hierarchy_ground_truth, "pearson")
 
-            # 5. Alignment with semantic ground truth
-            r_sem_h, _ = rdm_corr(dist_h, semantic_ground_truth, "pearson")
-            r_sem_e, _ = rdm_corr(dist_e, semantic_ground_truth, "pearson")
+                # 5. Alignment with semantic ground truth
+                r_sem_h, _ = rdm_corr(dist_h, semantic_ground_truth, "pearson")
+                r_sem_e, _ = rdm_corr(dist_e, semantic_ground_truth, "pearson")
 
-            records.append({
-                "target_space": target_name,
-                "dimension": d,
+                # Subject-level alignment across confirmation cohort (Sub-06..10)
+                sub_r_h = []
+                sub_r_e = []
+                for s in range(6, 11):
+                    sub_rdm = stage2_neural_bundle[f"sub{s:02d}_primary_ang"]
+                    r_sh, _ = rdm_corr(dist_h, sub_rdm, "pearson")
+                    r_se, _ = rdm_corr(dist_e, sub_rdm, "pearson")
+                    sub_r_h.append(r_sh)
+                    sub_r_e.append(r_se)
+                    subject_alignment_records.append({
+                        "target_space": target_name,
+                        "dimension": d,
+                        "seed": seed,
+                        "subject": f"sub{s:02d}",
+                        "r_poincare": r_sh,
+                        "r_euclidean": r_se,
+                        "r_advantage_hyp": r_sh - r_se
+                    })
+
+                multi_seed_records.append({
+                    "target_space": target_name,
+                    "dimension": d,
+                    "seed": seed,
+                    "distortion_poincare": distort_h,
+                    "distortion_euclidean": distort_e,
+                    "distortion_advantage_hyp": distort_e - distort_h,
+                    "rho_poincare": rho_h,
+                    "rho_euclidean": rho_e,
+                    "confirmation_brain_r_hyp": r_brain_h,
+                    "confirmation_brain_r_euc": r_brain_e,
+                    "heldout_subjects_mean_r_hyp": float(np.mean(sub_r_h)),
+                    "heldout_subjects_sem_r_hyp": float(stats.sem(sub_r_h)),
+                    "heldout_subjects_mean_r_euc": float(np.mean(sub_r_e)),
+                    "heldout_subjects_sem_r_euc": float(stats.sem(sub_r_e)),
+                    "hierarchy_alignment_r_hyp": r_hie_h,
+                    "hierarchy_alignment_r_euc": r_hie_e,
+                    "semantic_alignment_r_hyp": r_sem_h,
+                    "semantic_alignment_r_euc": r_sem_e
+                })
+
+            # Print summary for this target and dimension (averaged across seeds)
+            sub_recs = [r for r in multi_seed_records if r["target_space"] == target_name and r["dimension"] == d]
+            mean_dh = np.mean([r["distortion_poincare"] for r in sub_recs])
+            mean_de = np.mean([r["distortion_euclidean"] for r in sub_recs])
+            mean_bh = np.mean([r["heldout_subjects_mean_r_hyp"] for r in sub_recs])
+            mean_be = np.mean([r["heldout_subjects_mean_r_euc"] for r in sub_recs])
+            print(f"  {target_name:<30} (d={d:2d}) | Distortion: Hyp={mean_dh:.4f} vs Euc={mean_de:.4f} "
+                  f"(Adv = {mean_de - mean_dh:+.4f}) | Held-out Brain: Hyp={mean_bh:.4f} vs Euc={mean_be:.4f}")
+
+    # Export consolidated CSVs (Change E)
+    df_multi_seed = pd.DataFrame(multi_seed_records)
+    csv_multi_path = OUT_TABLES / "stage4_embedding_distortion_multi_seed.csv"
+    df_multi_seed.to_csv(csv_multi_path, index=False)
+    print(f"\n[Saved] Multi-seed embedding distortion -> {csv_multi_path}")
+
+    df_sub_align = pd.DataFrame(subject_alignment_records)
+    csv_sub_path = OUT_TABLES / "stage4_heldout_neural_alignment_subject_level.csv"
+    df_sub_align.to_csv(csv_sub_path, index=False)
+    print(f"[Saved] Subject-level held-out alignment -> {csv_sub_path}")
+
+    # Retain backward-compatible stage4 summary table (seed 42 / mean)
+    compat_records = []
+    for r in multi_seed_records:
+        if r["seed"] == 42:
+            compat_records.append({
+                "target_space": r["target_space"],
+                "dimension": r["dimension"],
                 "geometry": "Hyperbolic (Poincaré)",
-                "reconstruction_distortion": distort_h,
-                "rank_preservation_rho": rho_h,
-                "independent_brain_alignment_r": r_brain_h,
-                "hierarchy_alignment_r": r_hie_h,
-                "semantic_alignment_r": r_sem_h
+                "reconstruction_distortion": r["distortion_poincare"],
+                "rank_preservation_rho": r["rho_poincare"],
+                "independent_brain_alignment_r": r["confirmation_brain_r_hyp"],
+                "hierarchy_alignment_r": r["hierarchy_alignment_r_hyp"],
+                "semantic_alignment_r": r["semantic_alignment_r_hyp"]
             })
-
-            records.append({
-                "target_space": target_name,
-                "dimension": d,
+            compat_records.append({
+                "target_space": r["target_space"],
+                "dimension": r["dimension"],
                 "geometry": "Euclidean",
-                "reconstruction_distortion": distort_e,
-                "rank_preservation_rho": rho_e,
-                "independent_brain_alignment_r": r_brain_e,
-                "hierarchy_alignment_r": r_hie_e,
-                "semantic_alignment_r": r_sem_e
+                "reconstruction_distortion": r["distortion_euclidean"],
+                "rank_preservation_rho": r["rho_euclidean"],
+                "independent_brain_alignment_r": r["confirmation_brain_r_euc"],
+                "hierarchy_alignment_r": r["hierarchy_alignment_r_euc"],
+                "semantic_alignment_r": r["semantic_alignment_r_euc"]
             })
-
-            print(f"  {target_name:<30} (d={d:2d}) | Distortion: Hyp={distort_h:.4f} vs Euc={distort_e:.4f} "
-                  f"| Brain RSA: Hyp={r_brain_h:.4f} vs Euc={r_brain_e:.4f}")
-
-    df_stage4 = pd.DataFrame(records)
+    df_stage4 = pd.DataFrame(compat_records)
     df_stage4.to_csv(OUT_TABLES / "stage4_embedding_comparison.csv", index=False)
+
+    return df_stage4, df_multi_seed, df_sub_align, trained_embeddings
 
     # Cross-Subject and Cross-Session Embedding Stability Test
     print("\n--- Cross-Subject & Cross-Session Embedding Stability ---")
@@ -818,7 +911,7 @@ def stage_4_compare_embeddings(stage2_neural_bundle, ref_rdms):
 # =============================================================================
 # VISUALIZATION & FIGURE GENERATION
 # =============================================================================
-def generate_all_stage_figures(df_rel, df_axioms, df_gromov, df_neural_embed, df_stage4, trained_embeddings):
+def generate_all_stage_figures(df_rel, df_axioms, df_gromov, df_neural_embed, df_stage4, trained_embeddings, df_multi_seed=None, df_sub_align=None):
     print("\n" + "=" * 80)
     print("GENERATING PUBLICATION-GRADE STAGE 1–4 FIGURES")
     print("=" * 80)
@@ -952,6 +1045,49 @@ def generate_all_stage_figures(df_rel, df_axioms, df_gromov, df_neural_embed, df
     plt.close()
     print(f"Saved: {fig3_p}")
 
+    # -------------------------------------------------------------------------
+    # Figure 19: Hyperbolic Advantage Across Abstraction Levels (Change E)
+    # -------------------------------------------------------------------------
+    if df_multi_seed is not None and not df_multi_seed.empty:
+        fig19, ax19 = plt.subplots(figsize=(10, 5))
+        # Ordered by conceptual abstraction level
+        target_order = [
+            "Low-Level Visual (Composite)",
+            "Deep Visual (ResNet Avgpool)",
+            "Semantic Language (MiniLM)",
+            "Neural RDM (Primary 50–300 ms)",
+            "Neural RDM (190 ms N170 Peak)",
+            "WordNet Hierarchy (Wu-Palmer)"
+        ]
+        target_labels = [
+            "Low-Level\nVisual",
+            "Deep Visual\n(ResNet)",
+            "Semantic\n(MiniLM)",
+            "Neural Primary\n(50–300 ms)",
+            "Neural Peak\n(190 ms N170)",
+            "WordNet\nHierarchy"
+        ]
+        df_plot = df_multi_seed[df_multi_seed["target_space"].isin(target_order)].copy()
+        df_d2 = df_plot[df_plot["dimension"] == 2]
+
+        sns.barplot(
+            data=df_d2, x="target_space", y="distortion_advantage_hyp",
+            order=target_order, palette="viridis", ax=ax19, ci=68, capsize=0.1
+        )
+        ax19.axhline(0, color="red", linestyle="--", lw=1.2, label="Zero Advantage (Flat Null)")
+        ax19.set_xticks(range(len(target_order)))
+        ax19.set_xticklabels(target_labels, fontsize=9.5)
+        ax19.set_ylabel("Hyperbolic Advantage: Distortion(Euc) - Distortion(Hyp)", fontsize=11)
+        ax19.set_title("Hyperbolic Advantage Across Conceptual Abstraction Levels (d = 2)", fontsize=12, fontweight="bold")
+        ax19.grid(axis="y", linestyle=":", alpha=0.5)
+        ax19.legend(loc="upper left")
+
+        plt.tight_layout()
+        fig19_p = OUT_FIGURES / "fig19_hyperbolic_advantage_vs_abstraction.png"
+        plt.savefig(fig19_p, dpi=300)
+        plt.close()
+        print(f"Saved: {fig19_p}")
+
 
 # =============================================================================
 # MAIN PIPELINE
@@ -959,8 +1095,19 @@ def generate_all_stage_figures(df_rel, df_axioms, df_gromov, df_neural_embed, df
 def main():
     t_start = time.time()
     print("=" * 80)
-    print("COMPLETE 4-STAGE PIPELINE: NEURAL GEOMETRY & EMBEDDINGS")
+    print("COMPLETE INVESTIGATION: NEURAL REPRESENTATIONAL GEOMETRY & EMBEDDINGS")
     print("=" * 80)
+
+    # Stage 0: Synthetic Tree Calibration (Change A)
+    from calibrate_hyperbolic_embeddings import run_synthetic_calibration_benchmark
+    print("\n--- STAGE 0: SYNTHETIC TREE & NOISE CALIBRATION ---")
+    calib_cache = OUT_TABLES / "synthetic_tree_calibration_results.csv"
+    if not calib_cache.exists():
+        df_calib, _ = run_synthetic_calibration_benchmark(
+            dimensions=(2, 5, 10), seeds=(42, 123), noise_levels=(0.0, 0.2, 0.4), n_epochs=300
+        )
+    else:
+        print(f"  Loaded precomputed synthetic tree calibration: {calib_cache}")
 
     # Stage 1: Finalise Reference RDMs
     ref_rdms, metric_ref_rdms, df_concepts = stage_1_finalise_reference_rdms()
@@ -973,14 +1120,19 @@ def main():
         stage2_neural_bundle, ref_rdms, df_rel, sub_session_ang
     )
 
-    # Stage 4: Compare Euclidean and Hyperbolic Embeddings
-    df_stage4, trained_embeddings = stage_4_compare_embeddings(stage2_neural_bundle, ref_rdms)
+    # Stage 4: Compare Euclidean and Hyperbolic Embeddings (Multi-Seed & Generalization)
+    df_stage4, df_multi_seed, df_sub_align, trained_embeddings = stage_4_compare_embeddings(
+        stage2_neural_bundle, ref_rdms, seeds=(42, 123, 999)
+    )
 
-    # Generate Figures
-    generate_all_stage_figures(df_rel, df_axioms, df_gromov, df_neural_embed, df_stage4, trained_embeddings)
+    # Generate Figures (including Fig 8, Fig 9, Fig 10, Fig 19)
+    generate_all_stage_figures(
+        df_rel, df_axioms, df_gromov, df_neural_embed, df_stage4,
+        trained_embeddings, df_multi_seed=df_multi_seed, df_sub_align=df_sub_align
+    )
 
     print("\n" + "=" * 80)
-    print(f"ALL 4 STAGES COMPLETED IN {time.time() - t_start:.1f}s")
+    print(f"ALL STAGES COMPLETED IN {time.time() - t_start:.1f}s")
     print("=" * 80)
 
 
