@@ -252,10 +252,10 @@ def add_eeg_like_noise(rdm: np.ndarray, noise_level: float = 0.0, seed: int = 42
     to confirm the exact simulated split-half reliability r_split_half = 1 / (1 + noise_level^2).
     
     Returns:
-      (noisy_rdm, simulated_split_half_r)
+      (h1, h2, simulated_split_half_r)
     """
     if noise_level <= 0.0:
-        return rdm.copy(), 1.0
+        return rdm.copy(), rdm.copy(), 1.0
 
     rng = np.random.RandomState(seed)
     n = rdm.shape[0]
@@ -278,191 +278,18 @@ def add_eeg_like_noise(rdm: np.ndarray, noise_level: float = 0.0, seed: int = 42
 
     # Compute simulated split-half reliability
     r_sh, _ = stats.pearsonr(h1[triu_idx], h2[triu_idx])
-    return h1, float(r_sh)
+    return h1, h2, float(r_sh)
 
 
 # =============================================================================
-# 3. OPTIMIZATION PIPELINE: RIEMANNIAN & EUCLIDEAN
+# 3. OPTIMIZATION PIPELINE: RIEMANNIAN & EUCLIDEAN (Canonical: embedding_fit.py)
 # =============================================================================
-
-def fit_poincare_with_curve(D_target: np.ndarray, dim: int = 2, lr: float = 0.04,
-                            n_epochs: int = 400, seed: int = 42,
-                            use_riemannian: bool = True) -> dict:
-    """
-    Fits Poincaré ball embedding with full convergence tracking and boundary saturation monitoring.
-    Uses RiemannianAdam from geoopt if use_riemannian=True, otherwise projected Euclidean Adam.
-    """
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    n = D_target.shape[0]
-
-    ball = geoopt.PoincareBall(c=1.0)
-    param = geoopt.ManifoldParameter(torch.randn(n, dim, device=DEVICE) * 0.05, manifold=ball)
-
-    if use_riemannian:
-        opt = geoopt.optim.RiemannianAdam([param], lr=lr)
-    else:
-        opt = optim.Adam([param], lr=lr)
-
-    D_tgt_t = torch.tensor(D_target, dtype=torch.float32, device=DEVICE)
-    triu_idx = torch.triu_indices(n, n, offset=1, device=DEVICE)
-    d_tgt_vec = D_tgt_t[triu_idx[0], triu_idx[1]].clamp(min=1e-4)
-
-    loss_curve = []
-    best_stress = float("inf")
-    conv_epoch = n_epochs
-    is_unstable = False
-
-    for ep in range(n_epochs):
-        opt.zero_grad()
-        # Compute geodesic distance on Poincare ball
-        sqnorm = torch.sum(param ** 2, dim=-1, keepdim=True).clamp(max=1.0 - 1e-5)
-        diff_sq = torch.cdist(param, param, p=2) ** 2
-        denom = torch.clamp((1.0 - sqnorm) @ (1.0 - sqnorm).T, min=1e-6)
-        gamma = torch.clamp(1.0 + 2.0 * diff_sq / denom, min=1.0 + 1e-6)
-        d_emb = torch.acosh(gamma)
-
-        dv = d_emb[triu_idx[0], triu_idx[1]]
-        scale = torch.sum(dv * d_tgt_vec) / (torch.sum(dv ** 2) + 1e-8)
-        scaled_dv = scale * dv
-        stress = torch.sum((scaled_dv - d_tgt_vec) ** 2) / (torch.sum(d_tgt_vec ** 2) + 1e-8)
-
-        if not torch.isfinite(stress):
-            is_unstable = True
-            break
-
-        stress.backward()
-        opt.step()
-
-        # Projection if using Euclidean Adam
-        if not use_riemannian:
-            with torch.no_grad():
-                norm = param.norm(dim=-1, keepdim=True)
-                param.copy_(torch.where(norm > 0.999, 0.999 * param / (norm + 1e-8), param))
-
-        s_val = float(np.sqrt(max(stress.item(), 0.0)))
-        loss_curve.append(s_val)
-        if s_val < best_stress:
-            best_stress = s_val
-            conv_epoch = ep + 1
-
-    with torch.no_grad():
-        sqnorm = torch.sum(param ** 2, dim=-1, keepdim=True).clamp(max=1.0 - 1e-5)
-        diff_sq = torch.cdist(param, param, p=2) ** 2
-        denom = torch.clamp((1.0 - sqnorm) @ (1.0 - sqnorm).T, min=1e-6)
-        gamma = torch.clamp(1.0 + 2.0 * diff_sq / denom, min=1.0 + 1e-6)
-        final_d = torch.acosh(gamma).cpu().numpy()
-        norms = param.norm(dim=-1).cpu().numpy()
-        boundary_sat = float(np.mean(norms >= 0.95))
-        max_norm = float(np.max(norms))
-
-    return {
-        "fitted_d": final_d,
-        "loss_curve": loss_curve,
-        "final_stress": loss_curve[-1] if loss_curve else 1.0,
-        "best_stress": best_stress,
-        "convergence_epoch": conv_epoch,
-        "is_unstable": is_unstable,
-        "boundary_saturation": boundary_sat,
-        "max_norm": max_norm
-    }
-
-
-def fit_euclidean_with_curve(D_target: np.ndarray, dim: int = 2, lr: float = 0.04,
-                             n_epochs: int = 400, seed: int = 42) -> dict:
-    """
-    Fits Euclidean embedding using Adam with convergence tracking.
-    """
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    n = D_target.shape[0]
-
-    param = nn.Parameter(torch.randn(n, dim, device=DEVICE) * 0.1)
-    opt = optim.Adam([param], lr=lr)
-
-    D_tgt_t = torch.tensor(D_target, dtype=torch.float32, device=DEVICE)
-    triu_idx = torch.triu_indices(n, n, offset=1, device=DEVICE)
-    d_tgt_vec = D_tgt_t[triu_idx[0], triu_idx[1]].clamp(min=1e-4)
-
-    loss_curve = []
-    best_stress = float("inf")
-    conv_epoch = n_epochs
-    is_unstable = False
-
-    for ep in range(n_epochs):
-        opt.zero_grad()
-        d_emb = torch.cdist(param, param, p=2)
-        dv = d_emb[triu_idx[0], triu_idx[1]]
-        scale = torch.sum(dv * d_tgt_vec) / (torch.sum(dv ** 2) + 1e-8)
-        scaled_dv = scale * dv
-        stress = torch.sum((scaled_dv - d_tgt_vec) ** 2) / (torch.sum(d_tgt_vec ** 2) + 1e-8)
-
-        if not torch.isfinite(stress):
-            is_unstable = True
-            break
-
-        stress.backward()
-        opt.step()
-
-        s_val = float(np.sqrt(max(stress.item(), 0.0)))
-        loss_curve.append(s_val)
-        if s_val < best_stress:
-            best_stress = s_val
-            conv_epoch = ep + 1
-
-    with torch.no_grad():
-        final_d = torch.cdist(param, param, p=2).cpu().numpy()
-
-    return {
-        "fitted_d": final_d,
-        "loss_curve": loss_curve,
-        "final_stress": loss_curve[-1] if loss_curve else 1.0,
-        "best_stress": best_stress,
-        "convergence_epoch": conv_epoch,
-        "is_unstable": is_unstable
-    }
-
-
-def evaluate_embedding_quality(D_true: np.ndarray, D_fitted: np.ndarray) -> dict:
-    """
-    Computes comprehensive geometry-preservation metrics:
-      - Normalized stress (RMSE relative to target scale)
-      - Mean relative error (MRE)
-      - Spearman rank correlation (rho)
-      - Pearson linear correlation (r)
-      - Kruskal stress-1
-      - Triangle inequality violation rate
-    """
-    n = D_true.shape[0]
-    iu = np.triu_indices(n, k=1)
-    dt = D_true[iu]
-    df = D_fitted[iu]
-
-    scale = np.sum(df * dt) / (np.sum(df ** 2) + 1e-8)
-    scaled_df = scale * df
-
-    stress = np.sqrt(np.sum((scaled_df - dt) ** 2) / (np.sum(dt ** 2) + 1e-8))
-    kruskal = np.sqrt(np.sum((scaled_df - dt) ** 2) / (np.sum(scaled_df ** 2) + 1e-8))
-    mre = np.mean(np.abs(scaled_df - dt) / (dt + 1e-4))
-    rho, _ = stats.spearmanr(dt, df)
-    r_val, _ = stats.pearsonr(dt, df)
-
-    # Triangle inequality violations on 2,000 random triplets (vectorized)
-    rng = np.random.RandomState(42)
-    n_triplets = 2000
-    triplets = rng.choice(n, size=(n_triplets, 3), replace=True)
-    i_idx, j_idx, k_idx = triplets[:, 0], triplets[:, 1], triplets[:, 2]
-    violations = np.sum(D_fitted[i_idx, j_idx] > D_fitted[i_idx, k_idx] + D_fitted[k_idx, j_idx] + 1e-5)
-    tiv_rate = float(violations / n_triplets)
-
-    return {
-        "stress": float(stress),
-        "kruskal_stress": float(kruskal),
-        "mre": float(mre),
-        "spearman_rho": float(rho),
-        "pearson_r": float(r_val),
-        "triangle_violation_rate": tiv_rate
-    }
+from embedding_fit import (
+    fit_poincare_with_curve,
+    fit_euclidean_with_curve,
+    evaluate_embedding_quality,
+    compute_gromov_hyperbolicity_common_metric
+)
 
 
 # =============================================================================
@@ -478,43 +305,56 @@ def run_synthetic_calibration_benchmark(dimensions=(2, 5, 10),
       1. Balanced Tree (k=3)
       2. Unbalanced Rooted Taxonomy
       3. Preferential Attachment Tree
-      4. Dimension-Matched Flat Control (R^d for each d in dimensions)
+      4. Real WordNet Taxonomies (Wu-Palmer & Path)
+      5. Dimension-Matched Flat Control (R^d for each d in dimensions)
     Across 10 seeds and noise levels calibrated to THINGS-EEG2 split-half reliability.
     """
     print("\n" + "=" * 80, flush=True)
-    print("CALIBRATING HYPERBOLIC EMBEDDINGS ACROSS TOPOLOGIES, FLAT CONTROLS & NOISE", flush=True)
+    print("CALIBRATING HYPERBOLIC EMBEDDINGS ACROSS TOPOLOGIES, WORDNET & NOISE", flush=True)
     print(f"Device: {DEVICE} | Dimensions: {dimensions} | Seeds: {len(seeds)} | Noise Levels: {noise_levels}", flush=True)
     print("=" * 80, flush=True)
 
-    # Base clean spaces (tree topologies)
-    tree_spaces = {
-        "Balanced Tree (k=3)": generate_balanced_tree_rdm(n_nodes=200, branching_factor=3, seed=42),
-        "Unbalanced Taxonomy (Rooted)": generate_unbalanced_taxonomy_rdm(n_nodes=200, seed=42),
-        "Preferential Tree (Hubs)": generate_preferential_tree_rdm(n_nodes=200, seed=42),
+    # Load Real WordNet targets from stage1 reference RDMs
+    ref_path = BASE_DIR / "results/neural_geometry/rdms/stage1_final_reference_rdms.npz"
+    wordnet_targets = {}
+    if ref_path.exists():
+        ref_npz = np.load(ref_path)
+        if "hierarchy_wup" in ref_npz:
+            wordnet_targets["WordNet Wu-Palmer (Real)"] = ref_npz["hierarchy_wup"]
+        if "hierarchy_path" in ref_npz:
+            wordnet_targets["WordNet Path (Real)"] = ref_npz["hierarchy_path"]
+
+    # Space specifications
+    synthetic_spaces = {
+        "Balanced Tree (k=3)": lambda s: generate_balanced_tree_rdm(n_nodes=200, branching_factor=3, seed=s),
+        "Unbalanced Taxonomy (Rooted)": lambda s: generate_unbalanced_taxonomy_rdm(n_nodes=200, seed=s),
+        "Preferential Tree (Hubs)": lambda s: generate_preferential_tree_rdm(n_nodes=200, seed=s),
     }
 
     records = []
     convergence_curves = {}
 
-    for space_name, clean_rdm in tree_spaces.items():
+    # 1. Synthetic Hierarchies (Seed-dependent generation + noise)
+    for space_name, gen_func in synthetic_spaces.items():
         print(f"\nEvaluating Topology: {space_name} ...", flush=True)
         for noise in noise_levels:
-            noisy_rdm, sim_r = add_eeg_like_noise(clean_rdm, noise_level=noise, seed=42)
-            print(f"  Noise={noise:.2f} (Simulated EEG r_split_half={sim_r:.2f}) ...", flush=True)
-
             for d in dimensions:
                 for seed in seeds:
-                    # Fit Poincare (RiemannianAdam)
-                    res_hyp = fit_poincare_with_curve(noisy_rdm, dim=d, lr=0.04, n_epochs=n_epochs, seed=seed, use_riemannian=True)
-                    eval_hyp = evaluate_embedding_quality(clean_rdm, res_hyp["fitted_d"])
+                    clean_rdm = gen_func(seed)
+                    h1, h2, sim_r = add_eeg_like_noise(clean_rdm, noise_level=noise, seed=seed)
 
-                    # Fit Euclidean
-                    res_euc = fit_euclidean_with_curve(noisy_rdm, dim=d, lr=0.04, n_epochs=n_epochs, seed=seed)
-                    eval_euc = evaluate_embedding_quality(clean_rdm, res_euc["fitted_d"])
+                    # Fit on Half 1
+                    res_hyp = fit_poincare_with_curve(h1, dim=d, lr=0.04, n_epochs=n_epochs, seed=seed, use_riemannian=True)
+                    eval_hyp_clean = evaluate_embedding_quality(clean_rdm, res_hyp["fitted_d"])
+                    eval_hyp_sh = evaluate_embedding_quality(h2, res_hyp["fitted_d"])
 
-                    # Fit Poincare with Projected Adam on first seed for direct optimization comparison
+                    res_euc = fit_euclidean_with_curve(h1, dim=d, lr=0.04, n_epochs=n_epochs, seed=seed)
+                    eval_euc_clean = evaluate_embedding_quality(clean_rdm, res_euc["fitted_d"])
+                    eval_euc_sh = evaluate_embedding_quality(h2, res_euc["fitted_d"])
+
+                    # Direct Adam comparison on seed 42
                     if seed == seeds[0]:
-                        res_hyp_adam = fit_poincare_with_curve(noisy_rdm, dim=d, lr=0.04, n_epochs=n_epochs, seed=seed, use_riemannian=False)
+                        res_hyp_adam = fit_poincare_with_curve(h1, dim=d, lr=0.04, n_epochs=n_epochs, seed=seed, use_riemannian=False)
                         adam_stress = res_hyp_adam["final_stress"]
                     else:
                         adam_stress = np.nan
@@ -530,34 +370,78 @@ def run_synthetic_calibration_benchmark(dimensions=(2, 5, 10),
                         "simulated_split_half_r": sim_r,
                         "dimension": d,
                         "seed": seed,
-                        "stress_poincare": eval_hyp["stress"],
+                        "stress_poincare": eval_hyp_clean["stress"],
+                        "stress_poincare_sh": eval_hyp_sh["stress"],
                         "stress_poincare_best": res_hyp["best_stress"],
                         "stress_poincare_adam": adam_stress,
-                        "stress_euclidean": eval_euc["stress"],
+                        "stress_euclidean": eval_euc_clean["stress"],
+                        "stress_euclidean_sh": eval_euc_sh["stress"],
                         "stress_euclidean_best": res_euc["best_stress"],
-                        "stress_advantage_hyp": eval_euc["stress"] - eval_hyp["stress"],
-                        "rho_poincare": eval_hyp["spearman_rho"],
-                        "rho_euclidean": eval_euc["spearman_rho"],
-                        "rank_advantage_hyp": eval_hyp["spearman_rho"] - eval_euc["spearman_rho"],
+                        "stress_advantage_hyp": eval_euc_clean["stress"] - eval_hyp_clean["stress"],
+                        "stress_advantage_hyp_sh": eval_euc_sh["stress"] - eval_hyp_sh["stress"],
+                        "rho_poincare": eval_hyp_clean["spearman_rho"],
+                        "rho_euclidean": eval_euc_clean["spearman_rho"],
+                        "rank_advantage_hyp": eval_hyp_clean["spearman_rho"] - eval_euc_clean["spearman_rho"],
                         "boundary_saturation": res_hyp["boundary_saturation"],
                         "max_norm_hyp": res_hyp["max_norm"],
-                        "hyp_wins": bool(eval_hyp["stress"] < eval_euc["stress"])
+                        "hyp_wins": bool(eval_hyp_clean["stress"] < eval_euc_clean["stress"])
                     })
 
-    # Dimension-Matched Flat Control (R^d for each d)
+    # 2. Real WordNet Taxonomies
+    for wn_name, clean_wn in wordnet_targets.items():
+        print(f"\nEvaluating Real WordNet Target: {wn_name} ...", flush=True)
+        for noise in noise_levels:
+            for d in dimensions:
+                for seed in seeds:
+                    h1, h2, sim_r = add_eeg_like_noise(clean_wn, noise_level=noise, seed=seed)
+
+                    res_hyp = fit_poincare_with_curve(h1, dim=d, lr=0.04, n_epochs=n_epochs, seed=seed, use_riemannian=True)
+                    eval_hyp_clean = evaluate_embedding_quality(clean_wn, res_hyp["fitted_d"])
+                    eval_hyp_sh = evaluate_embedding_quality(h2, res_hyp["fitted_d"])
+
+                    res_euc = fit_euclidean_with_curve(h1, dim=d, lr=0.04, n_epochs=n_epochs, seed=seed)
+                    eval_euc_clean = evaluate_embedding_quality(clean_wn, res_euc["fitted_d"])
+                    eval_euc_sh = evaluate_embedding_quality(h2, res_euc["fitted_d"])
+
+                    records.append({
+                        "space": wn_name,
+                        "noise_level": noise,
+                        "simulated_split_half_r": sim_r,
+                        "dimension": d,
+                        "seed": seed,
+                        "stress_poincare": eval_hyp_clean["stress"],
+                        "stress_poincare_sh": eval_hyp_sh["stress"],
+                        "stress_poincare_best": res_hyp["best_stress"],
+                        "stress_poincare_adam": np.nan,
+                        "stress_euclidean": eval_euc_clean["stress"],
+                        "stress_euclidean_sh": eval_euc_sh["stress"],
+                        "stress_euclidean_best": res_euc["best_stress"],
+                        "stress_advantage_hyp": eval_euc_clean["stress"] - eval_hyp_clean["stress"],
+                        "stress_advantage_hyp_sh": eval_euc_sh["stress"] - eval_hyp_sh["stress"],
+                        "rho_poincare": eval_hyp_clean["spearman_rho"],
+                        "rho_euclidean": eval_euc_clean["spearman_rho"],
+                        "rank_advantage_hyp": eval_hyp_clean["spearman_rho"] - eval_euc_clean["spearman_rho"],
+                        "boundary_saturation": res_hyp["boundary_saturation"],
+                        "max_norm_hyp": res_hyp["max_norm"],
+                        "hyp_wins": bool(eval_hyp_clean["stress"] < eval_euc_clean["stress"])
+                    })
+
+    # 3. Dimension-Matched Flat Control (R^d for each d)
     print("\nEvaluating Dimension-Matched Flat Euclidean Controls (R^d) ...", flush=True)
     for d in dimensions:
-        clean_flat_rdm = generate_matched_euclidean_rdm(n_points=200, dim=d, seed=42)
         print(f"  Matched Dimension d={d} (Ground Truth in R^{d}) ...", flush=True)
-
         for noise in noise_levels:
-            noisy_rdm, sim_r = add_eeg_like_noise(clean_flat_rdm, noise_level=noise, seed=42)
             for seed in seeds:
-                res_hyp = fit_poincare_with_curve(noisy_rdm, dim=d, lr=0.04, n_epochs=n_epochs, seed=seed, use_riemannian=True)
-                eval_hyp = evaluate_embedding_quality(clean_flat_rdm, res_hyp["fitted_d"])
+                clean_flat_rdm = generate_matched_euclidean_rdm(n_points=200, dim=d, seed=seed)
+                h1, h2, sim_r = add_eeg_like_noise(clean_flat_rdm, noise_level=noise, seed=seed)
 
-                res_euc = fit_euclidean_with_curve(noisy_rdm, dim=d, lr=0.04, n_epochs=n_epochs, seed=seed)
-                eval_euc = evaluate_embedding_quality(clean_flat_rdm, res_euc["fitted_d"])
+                res_hyp = fit_poincare_with_curve(h1, dim=d, lr=0.04, n_epochs=n_epochs, seed=seed, use_riemannian=True)
+                eval_hyp_clean = evaluate_embedding_quality(clean_flat_rdm, res_hyp["fitted_d"])
+                eval_hyp_sh = evaluate_embedding_quality(h2, res_hyp["fitted_d"])
+
+                res_euc = fit_euclidean_with_curve(h1, dim=d, lr=0.04, n_epochs=n_epochs, seed=seed)
+                eval_euc_clean = evaluate_embedding_quality(clean_flat_rdm, res_euc["fitted_d"])
+                eval_euc_sh = evaluate_embedding_quality(h2, res_euc["fitted_d"])
 
                 records.append({
                     "space": "Flat Euclidean Control (Dimension-Matched)",
@@ -566,18 +450,21 @@ def run_synthetic_calibration_benchmark(dimensions=(2, 5, 10),
                     "simulated_split_half_r": sim_r,
                     "dimension": d,
                     "seed": seed,
-                    "stress_poincare": eval_hyp["stress"],
+                    "stress_poincare": eval_hyp_clean["stress"],
+                    "stress_poincare_sh": eval_hyp_sh["stress"],
                     "stress_poincare_best": res_hyp["best_stress"],
                     "stress_poincare_adam": np.nan,
-                    "stress_euclidean": eval_euc["stress"],
+                    "stress_euclidean": eval_euc_clean["stress"],
+                    "stress_euclidean_sh": eval_euc_sh["stress"],
                     "stress_euclidean_best": res_euc["best_stress"],
-                    "stress_advantage_hyp": eval_euc["stress"] - eval_hyp["stress"],
-                    "rho_poincare": eval_hyp["spearman_rho"],
-                    "rho_euclidean": eval_euc["spearman_rho"],
-                    "rank_advantage_hyp": eval_hyp["spearman_rho"] - eval_euc["spearman_rho"],
+                    "stress_advantage_hyp": eval_euc_clean["stress"] - eval_hyp_clean["stress"],
+                    "stress_advantage_hyp_sh": eval_euc_sh["stress"] - eval_hyp_sh["stress"],
+                    "rho_poincare": eval_hyp_clean["spearman_rho"],
+                    "rho_euclidean": eval_euc_clean["spearman_rho"],
+                    "rank_advantage_hyp": eval_hyp_clean["spearman_rho"] - eval_euc_clean["spearman_rho"],
                     "boundary_saturation": res_hyp["boundary_saturation"],
                     "max_norm_hyp": res_hyp["max_norm"],
-                    "hyp_wins": bool(eval_hyp["stress"] < eval_euc["stress"])
+                    "hyp_wins": bool(eval_hyp_clean["stress"] < eval_euc_clean["stress"])
                 })
 
     df_results = pd.DataFrame(records)
@@ -668,7 +555,7 @@ def generate_synthetic_calibration_figure(df_results: pd.DataFrame, convergence_
     ax_b = axes[0, 1]
     df_clean = df_results[df_results["noise_level"] == 0.0]
     sns.barplot(data=df_clean, x="dimension", y="stress_advantage_hyp", hue="space",
-                palette=["#2ca02c", "#ff7f0e", "#9467bd", "#7f7f7f"], ax=ax_b, errorbar=("ci", 95), capsize=0.08)
+                palette=["#2ca02c", "#ff7f0e", "#9467bd", "#1f77b4", "#8c564b", "#7f7f7f"], ax=ax_b, errorbar=("ci", 95), capsize=0.08)
     ax_b.axhline(0, color="black", linestyle="--", lw=1.0)
     ax_b.set_title("B. Clean Hyperbolic Advantage Across Dimensions (Noise=0)", fontweight="bold")
     ax_b.set_xlabel("Embedding Dimension (d)")
@@ -680,7 +567,7 @@ def generate_synthetic_calibration_figure(df_results: pd.DataFrame, convergence_
     ax_c = axes[1, 0]
     df_eeg_noise = df_results[df_results["noise_level"] == 1.25]
     sns.barplot(data=df_eeg_noise, x="dimension", y="stress_advantage_hyp", hue="space",
-                palette=["#2ca02c", "#ff7f0e", "#9467bd", "#7f7f7f"], ax=ax_c, errorbar=("ci", 95), capsize=0.08)
+                palette=["#2ca02c", "#ff7f0e", "#9467bd", "#1f77b4", "#8c564b", "#7f7f7f"], ax=ax_c, errorbar=("ci", 95), capsize=0.08)
     ax_c.axhline(0, color="black", linestyle="--", lw=1.0)
     ax_c.set_title("C. Hyperbolic Advantage Under Empirical EEG Noise (r ~ 0.39)", fontweight="bold")
     ax_c.set_xlabel("Embedding Dimension (d)")

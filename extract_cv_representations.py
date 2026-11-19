@@ -31,6 +31,7 @@
 
 import os
 import sys
+import re
 import json
 import zipfile
 import argparse
@@ -61,7 +62,7 @@ HEEGNET_MODELS_DIR = BASE_DIR / "results/heegnet/models"
 RIGOROUS_MODELS_DIR = BASE_DIR / "results/rigorous_evaluation/models"
 REF_RDMS_PATH = BASE_DIR / "results/neural_geometry/rdms/stage1_final_reference_rdms.npz"
 
-DEVICE = torch.device("cuda:1" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else ("cuda:0" if torch.cuda.is_available() else "cpu"))
+DEVICE = torch.device(os.environ.get("DEVICE", "cuda:0" if torch.cuda.is_available() else "cpu"))
 
 
 # ==============================================================================
@@ -168,20 +169,35 @@ def run_extraction():
     print(f"Output Directory: {RESULTS_DIR}")
     print("=" * 80)
 
-    # 1. Discover Checkpoints
+    # 1. Discover Checkpoints (including CV Folds and 4-Head Models)
     checkpoints = {}
+    CV_MODELS_DIR = BASE_DIR / "results/rigorous_evaluation/cv/models"
+    if CV_MODELS_DIR.exists():
+        for pt in sorted(CV_MODELS_DIR.glob("*.pt")):
+            model_type = "HEEGNet" if "heegnet" in pt.name else "EuclideanEEGNet"
+            geom_type = "lorentz" if "heegnet" in pt.name else "euclidean"
+            checkpoints[f"cv_{pt.stem}"] = {
+                "path": pt,
+                "arch": model_type,
+                "type": geom_type,
+                "curvature": 1.0,
+                "num_classes": 200
+            }
+
     if (RIGOROUS_MODELS_DIR / "best_heegnet_hyperbolic.pt").exists():
         checkpoints["heegnet_hyperbolic"] = {
             "path": RIGOROUS_MODELS_DIR / "best_heegnet_hyperbolic.pt",
             "arch": "HEEGNet",
             "type": "lorentz",
-            "curvature": 1.0
+            "curvature": 1.0,
+            "num_classes": 1654
         }
     if (RIGOROUS_MODELS_DIR / "best_eegnet_euclidean.pt").exists():
         checkpoints["eegnet_euclidean"] = {
             "path": RIGOROUS_MODELS_DIR / "best_eegnet_euclidean.pt",
             "arch": "EuclideanEEGNet",
-            "type": "euclidean"
+            "type": "euclidean",
+            "num_classes": 1654
         }
 
     # Discover 4-head checkpoints
@@ -193,7 +209,8 @@ def run_extraction():
                 "arch": "ModularEEGNet",
                 "head": head,
                 "type": "lorentz" if "lorentz" in head else ("cosine" if head == "cosine" else "euclidean"),
-                "curvature": 1.0
+                "curvature": 1.0,
+                "num_classes": 1654
             }
 
     print(f"Found {len(checkpoints)} validated checkpoints:")
@@ -233,23 +250,39 @@ def run_extraction():
             try:
                 # Instantiate architecture
                 if ckpt_info["arch"] == "HEEGNet":
-                    model = HEEGNet(chunk_size=100, num_electrodes=63, num_classes=1654,
-                                    domain_adaptation=False, device='cpu', dtype=torch.float32)
                     sd = torch.load(ckpt_info["path"], map_location="cpu")
-                    model.load_state_dict(sd, strict=False)
+                    domain_keys = [k for k in sd.keys() if "bn.batchnorm." in k]
+                    if "lmlp.a" in sd:
+                        num_cls = sd["lmlp.a"].shape[0]
+                    elif "lmlp.weight" in sd:
+                        num_cls = sd["lmlp.weight"].shape[0]
+                    else:
+                        num_cls = ckpt_info.get("num_classes", 1654)
+
+                    if domain_keys:
+                        dom_indices = [int(re.search(r"bn\.batchnorm\.(\d+)\.", k).group(1)) for k in domain_keys if re.search(r"bn\.batchnorm\.(\d+)\.", k)]
+                        domains = [torch.tensor(d) for d in sorted(list(set(dom_indices)))]
+                        model = HEEGNet(chunk_size=100, num_electrodes=63, num_classes=num_cls,
+                                        domain_adaptation=True, domains=domains, device='cpu', dtype=torch.float64)
+                    else:
+                        model = HEEGNet(chunk_size=100, num_electrodes=63, num_classes=num_cls,
+                                        domain_adaptation=False, device='cpu', dtype=torch.float64)
+                    model.load_state_dict(sd, strict=True)
                 elif ckpt_info["arch"] == "EuclideanEEGNet":
-                    model = EuclideanEEGNet(chunk_size=100, num_electrodes=63, num_classes=1654)
                     sd = torch.load(ckpt_info["path"], map_location="cpu")
-                    model.load_state_dict(sd, strict=False)
+                    num_cls = sd.get("classifier.weight", torch.zeros(ckpt_info.get("num_classes", 1654), 48)).shape[0] if "classifier.weight" in sd else ckpt_info.get("num_classes", 1654)
+                    model = EuclideanEEGNet(chunk_size=100, num_electrodes=63, num_classes=num_cls)
+                    model.load_state_dict(sd, strict=True)
                 elif ckpt_info["arch"] == "ModularEEGNet":
-                    model = ModularEEGNet(head_type=ckpt_info["head"], num_classes=1654,
-                                          chunk_size=100, num_electrodes=63)
                     sd = torch.load(ckpt_info["path"], map_location="cpu")
-                    # Try loading head weights if partial
-                    try:
-                        model.head.load_state_dict(sd, strict=False)
-                    except Exception:
-                        model.load_state_dict(sd, strict=False)
+                    if isinstance(sd, dict) and "encoder" in sd and "head" in sd:
+                        model = ModularEEGNet(head_type=ckpt_info["head"], num_classes=1654,
+                                              chunk_size=100, num_electrodes=63)
+                        model.encoder.load_state_dict(sd["encoder"], strict=True)
+                        model.head.load_state_dict(sd["head"], strict=True)
+                    else:
+                        print(f"    Skipping {ckpt_name}: checkpoint only contains head weights without saved encoder.")
+                        continue
 
                 feats_trials = extract_features_from_model(model, X_test, batch_size=512)
                 d_feat = feats_trials.shape[1]
@@ -275,9 +308,9 @@ def run_extraction():
                     rdm = 1.0 - (centroids @ centroids.T)
                     np.fill_diagonal(rdm, 0.0)
                 else:
-                    # Euclidean centroids & correlation distance
+                    # Euclidean centroids & standardized Euclidean distance metric
                     centroids = feats_reshaped.mean(axis=1)  # (200, 48)
-                    rdm = squareform(pdist(centroids, metric="correlation"))
+                    rdm = squareform(pdist(centroids, metric="euclidean"))
                     np.fill_diagonal(rdm, 0.0)
 
                 # Store

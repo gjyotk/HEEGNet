@@ -211,7 +211,8 @@ class LorentzLearnableHead(nn.Module):
     """
     Lorentz classification head with learnable curvature c > 0.
     Strict positivity is enforced via softplus: c = softplus(raw_c) + min_c.
-    Maintains finite gradients and strict manifold constraint satisfaction.
+    Maintains representations on canonical hyperboloid H^d(k=1.0) via learnable scale factor sqrt(c),
+    ensuring exact compatibility with LorentzMLR while enabling end-to-end gradient flow into the curvature.
     Returns: (logits, lorentz_features)
     """
     def __init__(self, in_dim: int = 48, num_classes: int = 1654,
@@ -224,7 +225,8 @@ class LorentzLearnableHead(nn.Module):
         raw_val = math.log(math.exp(max(init_curvature - min_curvature, 1e-4)) - 1.0)
         self.raw_c = nn.Parameter(torch.tensor(raw_val, dtype=torch.float32))
         self._linear = nn.Linear(in_dim, in_dim, bias=False)
-        self.mlr = LorentzMLR(CustomLorentz(k=1.0, learnable=False),
+        self.manifold = CustomLorentz(k=1.0, learnable=False)
+        self.mlr = LorentzMLR(self.manifold,
                               num_features=in_dim + 1, num_classes=num_classes)
 
     @property
@@ -234,11 +236,11 @@ class LorentzLearnableHead(nn.Module):
 
     def forward(self, feats: torch.Tensor, domains: torch.Tensor = None):
         c = self.curvature
-        manifold = CustomLorentz(k=c.item() if c.dim() == 0 else float(c.detach()), learnable=False)
-        space = self._linear(feats)
-        time = torch.sqrt(torch.sum(space ** 2, dim=-1, keepdim=True) + 1.0 / c)
+        scale = torch.sqrt(c)
+        space = self._linear(feats) * scale
+        time = torch.sqrt(torch.sum(space ** 2, dim=-1, keepdim=True) + 1.0)
         hyp_feats = torch.cat([time, space], dim=-1)
-        hyp_feats = manifold.projx(hyp_feats)
+        hyp_feats = self.manifold.projx(hyp_feats)
         logits = self.mlr(hyp_feats)
         return logits, hyp_feats
 

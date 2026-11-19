@@ -668,86 +668,13 @@ def run_multiple_regression_rsa(ref_rdms, df_time_robust):
 # =============================================================================
 # 5. EVALUATE REPRESENTATIONAL GEOMETRY (EUCLIDEAN VS HYPERBOLIC)
 # =============================================================================
-def poincare_distance_torch(u, eps=1e-5):
-    """
-    Compute pairwise hyperbolic distances in the Poincaré ball model:
-    d_H(u, v) = arcosh(1 + 2 * ||u - v||^2 / ((1 - ||u||^2) * (1 - ||v||^2)))
-    """
-    sq_u = torch.sum(u ** 2, dim=-1, keepdim=True)
-    sq_dist = torch.sum((u.unsqueeze(1) - u.unsqueeze(0)) ** 2, dim=-1)
-    denom = (1.0 - sq_u) * (1.0 - sq_u.t())
-    arg = 1.0 + 2.0 * sq_dist / (denom.clamp(min=eps))
-    return torch.acosh(arg.clamp(min=1.0))
-    return torch.acosh(arg.clamp(min=1.0 + 1e-6))
-
-
-def fit_poincare_embedding(target_dist_matrix, dim=2, lr=0.05, n_epochs=500):
-    """
-    Fit Poincaré disk/ball embedding minimizing distance distortion:
-    Loss = sum_{i < j} ((d_H(u_i, u_j) - d_ij) / d_ij)^2
-    """
-    torch.manual_seed(42)
-    n = target_dist_matrix.shape[0]
-    # Initialize near origin in Poincaré ball
-    emb = nn.Parameter(torch.randn(n, dim) * 0.05)
-    optimizer = optim.Adam([emb], lr=lr)
-
-    D_target = torch.tensor(target_dist_matrix, dtype=torch.float32)
-    triu_idx = torch.triu_indices(n, n, offset=1)
-    d_true = D_target[triu_idx[0], triu_idx[1]].clamp(min=1e-3)
-
-    for epoch in range(n_epochs):
-        optimizer.zero_grad()
-        # Project into Poincaré ball: ||u|| < 1 - 1e-4
-        with torch.no_grad():
-            norms = torch.norm(emb, dim=-1, keepdim=True)
-            max_norm = 1.0 - 1e-4
-            cond = norms > max_norm
-            emb.data = torch.where(cond, emb.data / norms * max_norm, emb.data)
-
-        d_pred = poincare_distance_torch(emb)
-        d_p_triu = d_pred[triu_idx[0], triu_idx[1]]
-        loss = torch.mean(((d_p_triu - d_true) / d_true) ** 2)
-        loss.backward()
-        optimizer.step()
-
-    with torch.no_grad():
-        norms = torch.norm(emb, dim=-1, keepdim=True)
-        max_norm = 1.0 - 1e-4
-        cond = norms > max_norm
-        emb.data = torch.where(cond, emb.data / norms * max_norm, emb.data)
-        final_dist = poincare_distance_torch(emb).cpu().numpy()
-        coords = emb.cpu().numpy()
-
-    return coords, final_dist
-
-
-def fit_euclidean_embedding(target_dist_matrix, dim=2, lr=0.05, n_epochs=500):
-    """Fit Euclidean embedding minimizing distance distortion."""
-    torch.manual_seed(42)
-    n = target_dist_matrix.shape[0]
-    emb = nn.Parameter(torch.randn(n, dim) * 0.5)
-    optimizer = optim.Adam([emb], lr=lr)
-
-    D_target = torch.tensor(target_dist_matrix, dtype=torch.float32)
-    triu_idx = torch.triu_indices(n, n, offset=1)
-    d_true = D_target[triu_idx[0], triu_idx[1]].clamp(min=1e-3)
-
-    for epoch in range(n_epochs):
-        optimizer.zero_grad()
-        sq_dist = torch.sum((emb.unsqueeze(1) - emb.unsqueeze(0)) ** 2, dim=-1)
-        d_pred = torch.sqrt(sq_dist.clamp(min=1e-8))
-        d_p_triu = d_pred[triu_idx[0], triu_idx[1]]
-        loss = torch.mean(((d_p_triu - d_true) / d_true) ** 2)
-        loss.backward()
-        optimizer.step()
-
-    with torch.no_grad():
-        sq_dist = torch.sum((emb.unsqueeze(1) - emb.unsqueeze(0)) ** 2, dim=-1)
-        final_dist = torch.sqrt(sq_dist.clamp(min=1e-8)).cpu().numpy()
-        coords = emb.cpu().numpy()
-
-    return coords, final_dist
+# PyTorch Embedding Optimization (Canonical Shared Module: embedding_fit.py)
+# =============================================================================
+from embedding_fit import (
+    fit_poincare_embedding,
+    fit_euclidean_embedding,
+    evaluate_embedding_quality
+)
 
 
 def run_geometry_evaluation(ref_rdms):
@@ -777,13 +704,11 @@ def run_geometry_evaluation(ref_rdms):
         emb_cache[f"hyp_{d}"] = (hyp_coords, hyp_dist)
         emb_cache[f"euc_{d}"] = (euc_coords, euc_dist)
 
-        # 1. Taxonomic distortion: mean relative error on upper triangle
-        tri_true = D_hie[TRIU].clip(min=1e-3)
-        hyp_tri = hyp_dist[TRIU]
-        euc_tri = euc_dist[TRIU]
-
-        hyp_distortion = float(np.mean(np.abs(hyp_tri - tri_true) / tri_true))
-        euc_distortion = float(np.mean(np.abs(euc_tri - tri_true) / tri_true))
+        # 1. Taxonomic distortion: canonical normalized stress on upper triangle
+        qual_h = evaluate_embedding_quality(D_hie, hyp_dist)
+        qual_e = evaluate_embedding_quality(D_hie, euc_dist)
+        hyp_distortion = qual_h["stress"]
+        euc_distortion = qual_e["stress"]
 
         # 2. Alignment with human neural RDM (Pearson r and Spearman rho)
         r_hyp_brain, _ = rdm_corr(hyp_dist, neural_grand, "pearson")

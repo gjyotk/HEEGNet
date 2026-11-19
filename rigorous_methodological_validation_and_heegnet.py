@@ -90,73 +90,10 @@ STAGE2_RDM_PATH = BASE_DIR / "results/neural_geometry/rdms/stage2_neural_rdms.np
 # ==============================================================================
 # SECTION 1: STRICT LEAK-FREE STAGE 4 EMBEDDING BENCHMARK (CRITICAL A FIX)
 # ==============================================================================
-
-def poincare_dist_matrix_torch(x, eps=1e-5):
-    sqnorms = torch.sum(x**2, dim=-1, keepdim=True)
-    sqnorms = torch.clamp(sqnorms, max=1.0 - eps)
-    dist_sq = torch.cdist(x, x, p=2)**2
-    alpha = 1.0 - sqnorms
-    gamma = 1.0 + 2.0 * dist_sq / torch.clamp(alpha @ alpha.T, min=eps)
-    gamma = torch.clamp(gamma, min=1.0 + eps)
-    return torch.acosh(gamma)
-
-def euclidean_dist_matrix_torch(x):
-    return torch.cdist(x, x, p=2)
-
-def fit_embedding(dist_mat, dim=2, geometry="poincare", epochs=500, lr=0.02, seed=42):
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    n = dist_mat.shape[0]
-    D_target = torch.tensor(dist_mat, dtype=torch.float32, device=DEVICE)
-    triu_idx = torch.triu_indices(n, n, offset=1, device=DEVICE)
-    d_target_vec = D_target[triu_idx[0], triu_idx[1]]
-    
-    if geometry == "poincare":
-        raw_x = torch.randn(n, dim, device=DEVICE, dtype=torch.float32) * 0.05
-        param = nn.Parameter(raw_x)
-        optimizer = torch.optim.Adam([param], lr=lr)
-        
-        for _ in range(epochs):
-            optimizer.zero_grad()
-            norm = torch.norm(param, p=2, dim=-1, keepdim=True)
-            factor = torch.where(norm > 0.9999, 0.9999 / (norm + 1e-8), torch.ones_like(norm))
-            x_ball = param * factor
-            d_emb = poincare_dist_matrix_torch(x_ball)
-            d_emb_vec = d_emb[triu_idx[0], triu_idx[1]]
-            scale = torch.sum(d_emb_vec * d_target_vec) / (torch.sum(d_emb_vec**2) + 1e-8)
-            stress = torch.sum((scale * d_emb_vec - d_target_vec)**2) / (torch.sum(d_target_vec**2) + 1e-8)
-            stress.backward()
-            optimizer.step()
-            
-        with torch.no_grad():
-            norm = torch.norm(param, p=2, dim=-1, keepdim=True)
-            factor = torch.where(norm > 0.9999, 0.9999 / (norm + 1e-8), torch.ones_like(norm))
-            x_ball = param * factor
-            d_final = poincare_dist_matrix_torch(x_ball).cpu().numpy()
-    else:
-        raw_x = torch.randn(n, dim, device=DEVICE, dtype=torch.float32) * 0.1
-        param = nn.Parameter(raw_x)
-        optimizer = torch.optim.Adam([param], lr=lr)
-        
-        for _ in range(epochs):
-            optimizer.zero_grad()
-            d_emb = euclidean_dist_matrix_torch(param)
-            d_emb_vec = d_emb[triu_idx[0], triu_idx[1]]
-            scale = torch.sum(d_emb_vec * d_target_vec) / (torch.sum(d_emb_vec**2) + 1e-8)
-            stress = torch.sum((scale * d_emb_vec - d_target_vec)**2) / (torch.sum(d_target_vec**2) + 1e-8)
-            stress.backward()
-            optimizer.step()
-            
-        with torch.no_grad():
-            d_final = euclidean_dist_matrix_torch(param).cpu().numpy()
-            
-    iu = np.triu_indices(n, k=1)
-    d_tgt = dist_mat[iu]
-    d_fit = d_final[iu]
-    scale = np.sum(d_fit * d_tgt) / (np.sum(d_fit**2) + 1e-8)
-    distortion = np.sqrt(np.mean((scale * d_fit - d_tgt)**2)) / (np.std(d_tgt) + 1e-8)
-    rho, _ = stats.spearmanr(d_tgt, d_fit)
-    return d_final, float(distortion), float(rho)
+from embedding_fit import (
+    fit_embedding,
+    evaluate_embedding_quality
+)
 
 def run_leak_free_stage4_benchmark():
     print("\n" + "=" * 80)

@@ -63,39 +63,9 @@ TRAINING_LOG_PATH = TABLES_DIR / "4head_training_seed42_avg1.csv"
 
 
 # ==============================================================================
-# 1. GROMOV DELTA HYPERBOLICITY
+# 1. GROMOV DELTA HYPERBOLICITY (Standardized Common Metric)
 # ==============================================================================
-
-def compute_gromov_delta_standardized(D: np.ndarray, n_quadruplets: int = 20000, seed: int = 42) -> dict:
-    """
-    Computes standardized Gromov 4-point hyperbolicity delta:
-      delta(x,y,z,w) = (1/2) * [max(S1, S2, S3) - middle(S1, S2, S3)]
-      delta_norm = median(delta) / diam(D)
-    """
-    rng = np.random.RandomState(seed)
-    n = D.shape[0]
-    diam = float(D.max())
-    if diam <= 1e-8:
-        return {"delta_raw_median": 0.0, "delta_norm_median": 0.0, "diameter": diam}
-
-    quads = [rng.choice(n, size=4, replace=False) for _ in range(n_quadruplets)]
-    deltas = []
-    for q in quads:
-        x, y, z, w = q
-        s1 = D[x, y] + D[z, w]
-        s2 = D[x, z] + D[y, w]
-        s3 = D[x, w] + D[y, z]
-        sums = sorted([s1, s2, s3])
-        deltas.append(0.5 * (sums[2] - sums[1]))
-
-    deltas = np.array(deltas)
-    raw_med = float(np.median(deltas))
-    norm_med = float(raw_med / diam)
-    return {
-        "delta_raw_median": round(raw_med, 4),
-        "delta_norm_median": round(norm_med, 4),
-        "diameter": round(diam, 4)
-    }
+from embedding_fit import compute_gromov_hyperbolicity_common_metric
 
 
 # ==============================================================================
@@ -135,13 +105,18 @@ def evaluate_ablation():
     # 1. Load Reference RDMs
     print(f"Loading reference RDMs from: {REF_RDMS_PATH}")
     ref_npz = np.load(REF_RDMS_PATH, allow_pickle=True)
+    if "visual_deep_layer4" not in ref_npz:
+        raise KeyError("visual_deep_layer4 missing from reference RDMs!")
+    if "behavioral_similarity" not in ref_npz:
+        raise KeyError("behavioral_similarity missing from reference RDMs!")
+
     ref_targets = {
         "WordNet_WUP": ref_npz["hierarchy_wup"],
         "WordNet_Path": ref_npz["hierarchy_path"],
         "Deep_Visual_Avgpool": ref_npz["visual_deep_avgpool"],
-        "Deep_Visual_Layer4": ref_npz["visual_deep_layer4"] if "visual_deep_layer4" in ref_npz else ref_npz["visual_deep_avgpool"],
+        "Deep_Visual_Layer4": ref_npz["visual_deep_layer4"],
         "Semantic_MiniLM": ref_npz["semantic_names"],
-        "Behavioral_Similarity": ref_npz["behavioral_similarity"] if "behavioral_similarity" in ref_npz else ref_npz["hierarchy_wup"]
+        "Behavioral_Similarity": ref_npz["behavioral_similarity"]
     }
     print(f"Loaded {len(ref_targets)} reference target spaces.")
 
@@ -151,7 +126,7 @@ def evaluate_ablation():
     heads = ["euclidean", "cosine", "lorentz_fixed", "lorentz_learnable"]
 
     # Map head keys to keys inside heldout_npz
-    # Keys in heldout_npz: sub-XX_eegnet_euc, sub-XX_eegnet_cosine, sub-XX_lorentz
+    # Keys in heldout_npz: sub-XX_eegnet_euc, sub-XX_eegnet_cosine, sub-XX_lorentz, sub-XX_lorentz_learnable
     def get_subject_rdm(sub, head):
         if head == "euclidean":
             return heldout_npz[f"{sub}_eegnet_euc"]
@@ -160,8 +135,9 @@ def evaluate_ablation():
         elif head == "lorentz_fixed":
             return heldout_npz[f"{sub}_lorentz"]
         elif head == "lorentz_learnable":
-            # Lorentz learnable with learned curvature; fallback to lorentz RDM with scaling
-            return heldout_npz[f"{sub}_lorentz"]
+            if f"{sub}_lorentz_learnable" in heldout_npz:
+                return heldout_npz[f"{sub}_lorentz_learnable"]
+            raise KeyError(f"Missing distinct lorentz_learnable RDM for {sub}")
         raise ValueError(head)
 
     # 3. Subject-Level Evaluation
@@ -170,14 +146,15 @@ def evaluate_ablation():
     for sub in test_subs:
         for head in heads:
             rdm = get_subject_rdm(sub, head)
-            delta_info = compute_gromov_delta_standardized(rdm, n_quadruplets=10000, seed=42)
+            delta_info = compute_gromov_hyperbolicity_common_metric(rdm, n_quadruplets=10000, seed=42)
 
             rec = {
                 "subject": sub,
                 "head": head,
-                "delta_raw": delta_info["delta_raw_median"],
-                "delta_norm": delta_info["delta_norm_median"],
-                "diameter": delta_info["diameter"]
+                "delta_mean": delta_info["norm_mean_delta"],
+                "delta_norm": delta_info["norm_p95_delta"],
+                "ci95_low": delta_info["ci95_low"],
+                "ci95_high": delta_info["ci95_high"]
             }
 
             # Align against all reference targets

@@ -29,6 +29,7 @@ os.makedirs("/tmp/mpl_cache", exist_ok=True)
 import time
 import json
 import subprocess
+import torch
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -40,21 +41,26 @@ RESULTS_DIR = BASE_DIR / "results/rigorous_evaluation"
 TABLES_DIR = RESULTS_DIR / "tables"
 FIGURES_DIR = RESULTS_DIR / "figures"
 LOGS_DIR = BASE_DIR / "logs/cv_full"
+CV_RESULTS_DIR = RESULTS_DIR / "cv"
 
 TABLES_DIR.mkdir(parents=True, exist_ok=True)
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
+CV_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-_gpu_env = os.environ.get("AVAILABLE_GPUS", os.environ.get("GPUS", ""))
+_gpu_env = os.environ.get("AVAILABLE_GPUS", os.environ.get("GPUS", os.environ.get("CUDA_VISIBLE_DEVICES", "")))
 if _gpu_env:
     AVAILABLE_GPUS = [int(g) for g in _gpu_env.split(",") if g.strip()]
+elif torch.cuda.is_available():
+    AVAILABLE_GPUS = list(range(torch.cuda.device_count()))
 else:
-    AVAILABLE_GPUS = [1, 2, 3, 4, 5, 7]
+    AVAILABLE_GPUS = []
+
 SEEDS = [42, 123, 999]
 MODELS = ["heegnet", "euclidean"]
 SUBJECTS = list(range(1, 11))
-EPOCHS = 10
-MIN_EPOCHS = 3
+EPOCHS = 50
+MIN_EPOCHS = 10
 
 
 def get_task_list():
@@ -63,7 +69,7 @@ def get_task_list():
         for model in MODELS:
             for sub in SUBJECTS:
                 tag = f"{model}_sub{sub}_seed{seed}"
-                out_json = BASE_DIR / f"cv_results_things_eeg2_{tag}.json"
+                out_json = CV_RESULTS_DIR / f"cv_results_things_eeg2_{tag}.json"
                 done = False
                 if out_json.exists() and out_json.stat().st_size > 50:
                     try:

@@ -1,5 +1,0 @@
-Method,triangle_violation_rate
-Correlation Distance (1 - r),0.0
-Angular Distance (arccos r),0.0
-Normalized-pattern Euclidean sqrt(2(1-r)),0.0
-Standardized Euclidean (common scaling),0.0

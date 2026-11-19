@@ -1,0 +1,227 @@
+[
+  {
+    "subject": "sub-06",
+    "model_key": "cv_heegnet_sub01_seed42_fold9",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.3706,
+    "rdm_max_dist": 1.2939,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-06",
+    "model_key": "heegnet_hyperbolic",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.1032,
+    "rdm_max_dist": 0.2964,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-06",
+    "model_key": "eegnet_euclidean",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.9295,
+    "rdm_max_dist": 2.1371,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-07",
+    "model_key": "cv_heegnet_sub01_seed42_fold9",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.39,
+    "rdm_max_dist": 1.4289,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-07",
+    "model_key": "heegnet_hyperbolic",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.1072,
+    "rdm_max_dist": 0.345,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-07",
+    "model_key": "eegnet_euclidean",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.9602,
+    "rdm_max_dist": 2.4957,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-08",
+    "model_key": "cv_heegnet_sub01_seed42_fold9",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.3348,
+    "rdm_max_dist": 1.3417,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-08",
+    "model_key": "heegnet_hyperbolic",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.1048,
+    "rdm_max_dist": 0.2989,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-08",
+    "model_key": "eegnet_euclidean",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.9096,
+    "rdm_max_dist": 2.3734,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-09",
+    "model_key": "cv_heegnet_sub01_seed42_fold9",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.3415,
+    "rdm_max_dist": 1.2816,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-09",
+    "model_key": "heegnet_hyperbolic",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.0947,
+    "rdm_max_dist": 0.27,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-09",
+    "model_key": "eegnet_euclidean",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.7516,
+    "rdm_max_dist": 1.8258,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-10",
+    "model_key": "cv_heegnet_sub01_seed42_fold9",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.3503,
+    "rdm_max_dist": 1.2702,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-10",
+    "model_key": "heegnet_hyperbolic",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.0982,
+    "rdm_max_dist": 0.2954,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-10",
+    "model_key": "eegnet_euclidean",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.9078,
+    "rdm_max_dist": 2.1475,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  }
+]

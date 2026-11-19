@@ -794,7 +794,7 @@ def train_heegnet_model(seeds=(42, 123, 999),
                          n_avg_reps=(1, 2, 4),
                          n_epochs=50,
                          patience=10,
-                         lambda_hier=0.1,
+                         lambda_hier=0.0,
                          lorentz_lr=1e-3):
     """
     Change B+C: Multi-seed, multi-rep, four-head training with early stopping
@@ -1042,7 +1042,12 @@ def train_heegnet_model(seeds=(42, 123, 999),
                         best_val[h]  = ep_rec[f"{h}_val_loss"]
                         no_improve[h]= 0
                         ckpt_path = MODELS_DIR / f"4head_{h}_{run_key}.pt"
-                        torch.save(four_head_model.heads[h].state_dict(), ckpt_path)
+                        torch.save({
+                            "encoder": four_head_model.encoder.state_dict(),
+                            "head": four_head_model.heads[h].state_dict(),
+                            "epoch": epoch,
+                            "val_loss": ep_rec[f"{h}_val_loss"]
+                        }, ckpt_path)
                         best_ckpt[h] = str(ckpt_path)
                         ep_rec[f"{h}_best_epoch"] = epoch
                     else:

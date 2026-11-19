@@ -1,0 +1,2 @@
+comparison,pearson_r,p_value,duplication_resolved
+layer4_spatial_max_vs_avgpool_global_mean,0.8244,0.0,True

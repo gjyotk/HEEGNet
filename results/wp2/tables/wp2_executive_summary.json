@@ -1,6 +1,6 @@
 {
   "n_concepts": 200,
-  "n_reference_rdms": 13,
+  "n_reference_rdms": 14,
   "reference_rdm_keys": [
     "visual_pixel",
     "visual_color",
@@ -14,7 +14,8 @@
     "semantic_definitions",
     "hierarchy_wup",
     "hierarchy_path",
-    "hierarchy_lin"
+    "hierarchy_lin",
+    "behavioral_similarity"
   ],
   "brain_model_alignment": [
     {
@@ -40,17 +41,6 @@
       "p_val_vs_zero": 1.3280776148537067e-07
     },
     {
-      "model": "visual_deep_layer4",
-      "mean_pearson_r": 0.09440566897392273,
-      "std_pearson_r": 0.019239508699432223,
-      "ci95_low": 0.0824808979375681,
-      "ci95_high": 0.10633044001027736,
-      "dev_mean_r": 0.08544890433549882,
-      "confirmation_mean_r": 0.10336243361234665,
-      "t_stat_vs_zero": 14.720594550843504,
-      "p_val_vs_zero": 1.3280776148537067e-07
-    },
-    {
       "model": "visual_color",
       "mean_pearson_r": 0.0911465898156166,
       "std_pearson_r": 0.026604667634463133,
@@ -60,6 +50,17 @@
       "confirmation_mean_r": 0.10407771170139313,
       "t_stat_vs_zero": 10.2778870686827,
       "p_val_vs_zero": 2.8469941072953912e-06
+    },
+    {
+      "model": "visual_deep_layer4",
+      "mean_pearson_r": 0.08590064905583858,
+      "std_pearson_r": 0.020913891546031006,
+      "ci95_low": 0.07293808477929174,
+      "ci95_high": 0.09886321333238542,
+      "dev_mean_r": 0.07811308577656746,
+      "confirmation_mean_r": 0.09368821233510971,
+      "t_stat_vs_zero": 12.322046645423189,
+      "p_val_vs_zero": 6.142909002422774e-07
     },
     {
       "model": "semantic_definitions",
@@ -174,5 +175,5 @@
       "peak_time_ms": 190.0
     }
   },
-  "elapsed_seconds": 176.76
+  "elapsed_seconds": 88.07
 }

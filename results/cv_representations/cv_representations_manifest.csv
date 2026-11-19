@@ -1,0 +1,16 @@
+subject,model_key,arch,geometry,feature_dim,rdm_shape,rdm_mean_dist,rdm_max_dist,is_symmetric,zero_diagonal
+sub-06,cv_heegnet_sub01_seed42_fold9,HEEGNet,lorentz,49,"[200, 200]",0.3706,1.2939,True,True
+sub-06,heegnet_hyperbolic,HEEGNet,lorentz,49,"[200, 200]",0.1032,0.2964,True,True
+sub-06,eegnet_euclidean,EuclideanEEGNet,euclidean,48,"[200, 200]",0.9295,2.1371,True,True
+sub-07,cv_heegnet_sub01_seed42_fold9,HEEGNet,lorentz,49,"[200, 200]",0.39,1.4289,True,True
+sub-07,heegnet_hyperbolic,HEEGNet,lorentz,49,"[200, 200]",0.1072,0.345,True,True
+sub-07,eegnet_euclidean,EuclideanEEGNet,euclidean,48,"[200, 200]",0.9602,2.4957,True,True
+sub-08,cv_heegnet_sub01_seed42_fold9,HEEGNet,lorentz,49,"[200, 200]",0.3348,1.3417,True,True
+sub-08,heegnet_hyperbolic,HEEGNet,lorentz,49,"[200, 200]",0.1048,0.2989,True,True
+sub-08,eegnet_euclidean,EuclideanEEGNet,euclidean,48,"[200, 200]",0.9096,2.3734,True,True
+sub-09,cv_heegnet_sub01_seed42_fold9,HEEGNet,lorentz,49,"[200, 200]",0.3415,1.2816,True,True
+sub-09,heegnet_hyperbolic,HEEGNet,lorentz,49,"[200, 200]",0.0947,0.27,True,True
+sub-09,eegnet_euclidean,EuclideanEEGNet,euclidean,48,"[200, 200]",0.7516,1.8258,True,True
+sub-10,cv_heegnet_sub01_seed42_fold9,HEEGNet,lorentz,49,"[200, 200]",0.3503,1.2702,True,True
+sub-10,heegnet_hyperbolic,HEEGNet,lorentz,49,"[200, 200]",0.0982,0.2954,True,True
+sub-10,eegnet_euclidean,EuclideanEEGNet,euclidean,48,"[200, 200]",0.9078,2.1475,True,True

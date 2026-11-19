@@ -333,9 +333,9 @@ def main():
         print("=" * 60)
 
         # Subject-level hold-out validation:
-        # Hold out an entire training subject for validation to guarantee genuine cross-subject validation
+        # Rotate validation subject deterministically across folds to eliminate bias toward Sub-10 or Sub-09
         fit_subs = np.unique(subjects[fit_idx])
-        val_subject = fit_subs[-1]
+        val_subject = fit_subs[ix_fold % len(fit_subs)]
         fit_sub_mask = subjects[fit_idx]
         train_idx = np.where(fit_sub_mask != val_subject)[0]
         val_idx = np.where(fit_sub_mask == val_subject)[0]
@@ -397,6 +397,14 @@ def main():
 
         base_model = model.module if isinstance(model, torch.nn.DataParallel) else model
 
+        # Save fold checkpoint for downstream feature extraction & geometry evaluation
+        cv_models_dir = Path(BASE_DIR) / "results/rigorous_evaluation/cv/models"
+        cv_models_dir.mkdir(parents=True, exist_ok=True)
+        sub_tag = int(test_subs[0]) if len(test_subs) == 1 else ix_fold
+        ckpt_path = cv_models_dir / f"{MODEL_TYPE}_sub{sub_tag:02d}_seed{SEED}_fold{ix_fold}.pt"
+        torch.save(base_model.state_dict(), ckpt_path)
+        print(f"  [Saved Checkpoint] -> {ckpt_path}")
+
         for td in domain[test_idx].unique():
             mask = domain[test_idx] == td
             ds_test = DomainDataset(X[test_idx][mask], y[test_idx][mask],
@@ -406,11 +414,11 @@ def main():
             # (a) no adaptation
             res_plain = trainer.test(base_model, dataloader=loader_test)
 
-            # (b) with SFUDA (on a copy, with dummy labels)
+            # (b) with SFUDA (refit on single trials for single-trial test)
             if USE_SFUDA and MODEL_TYPE != "euclidean" and hasattr(base_model, "domainadapt_finetune"):
-                sfuda_net = deepcopy(base_model)
-                sfuda_offline(ds_test, sfuda_net)
-                res_sfuda = trainer.test(sfuda_net, dataloader=loader_test)
+                sfuda_single = deepcopy(base_model)
+                sfuda_offline(ds_test, sfuda_single)
+                res_sfuda = trainer.test(sfuda_single, dataloader=loader_test)
             else:
                 res_sfuda = dict(loss=float("nan"), score=float("nan"))
 
@@ -431,8 +439,12 @@ def main():
             loader_test_avg = torch.utils.data.DataLoader(ds_test_avg, batch_size=len(ds_test_avg))
 
             res_avg_plain = trainer.test(base_model, dataloader=loader_test_avg)
+
+            # Refit SFUDA on averaged loader so domain statistics match averaged pseudo-trials
             if USE_SFUDA and MODEL_TYPE != "euclidean" and hasattr(base_model, "domainadapt_finetune"):
-                res_avg_sfuda = trainer.test(sfuda_net, dataloader=loader_test_avg)
+                sfuda_avg = deepcopy(base_model)
+                sfuda_offline(ds_test_avg, sfuda_avg)
+                res_avg_sfuda = trainer.test(sfuda_avg, dataloader=loader_test_avg)
             else:
                 res_avg_sfuda = dict(loss=float("nan"), score=float("nan"))
 
@@ -459,7 +471,9 @@ def main():
     print(resdf.groupby("test_subject")[cols].agg(["mean", "std"]).round(4))
     print(f"\nChance accuracy = {1 / N_CLASSES:.4f}, chance loss = {np.log(N_CLASSES):.3f}")
 
-    out_path = os.path.join(BASE_DIR, f"cv_results_things_eeg2_{RUN_TAG}.json")
+    out_dir = Path(BASE_DIR) / "results/rigorous_evaluation/cv"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"cv_results_things_eeg2_{RUN_TAG}.json"
     with open(out_path, "w") as f:
         json.dump(records, f, indent=2)
     print(f"Results saved to {out_path}")

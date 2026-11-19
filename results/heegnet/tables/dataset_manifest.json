@@ -1,6 +1,6 @@
 {
   "dataset": "THINGS-EEG2 (Gifford et al. 2022)",
-  "generated_at": "2026-11-18T09:21:48Z",
+  "generated_at": "2026-11-18T21:03:13Z",
   "subjects": {
     "sub-01": {
       "subject_id": 1,

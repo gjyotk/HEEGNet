@@ -238,74 +238,14 @@ def compute_tree_likeness(D):
 
 
 # =============================================================================
-# PyTorch Embedding Optimization (Poincaré vs Euclidean)
+# PyTorch Embedding Optimization (Canonical Shared Module: embedding_fit.py)
 # =============================================================================
-def poincare_distance_torch(u, eps=1e-5):
-    sq_u = torch.sum(u ** 2, dim=-1, keepdim=True)
-    sq_dist = torch.sum((u.unsqueeze(1) - u.unsqueeze(0)) ** 2, dim=-1)
-    denom = (1.0 - sq_u) * (1.0 - sq_u.t())
-    arg = 1.0 + 2.0 * sq_dist / (denom.clamp(min=eps))
-    return torch.acosh(arg.clamp(min=1.0 + 1e-6))
-
-
-def fit_poincare(D_target, dim=2, lr=0.03, n_epochs=600, seed=42):
-    torch.manual_seed(seed)
-    n = D_target.shape[0]
-    emb = nn.Parameter(torch.randn(n, dim) * 0.05)
-    optimizer = optim.Adam([emb], lr=lr)
-    
-    target_t = torch.tensor(D_target, dtype=torch.float32)
-    triu_idx = torch.triu_indices(n, n, offset=1)
-    d_true = target_t[triu_idx[0], triu_idx[1]].clamp(min=1e-3)
-
-    for epoch in range(n_epochs):
-        optimizer.zero_grad()
-        with torch.no_grad():
-            norms = torch.norm(emb, dim=-1, keepdim=True)
-            max_norm = 1.0 - 1e-4
-            emb.data = torch.where(norms > max_norm, emb.data / norms * max_norm, emb.data)
-
-        d_pred = poincare_distance_torch(emb)
-        d_p_triu = d_pred[triu_idx[0], triu_idx[1]]
-        loss = torch.mean(((d_p_triu - d_true) / d_true) ** 2)
-        loss.backward()
-        optimizer.step()
-
-    with torch.no_grad():
-        norms = torch.norm(emb, dim=-1, keepdim=True)
-        max_norm = 1.0 - 1e-4
-        emb.data = torch.where(norms > max_norm, emb.data / norms * max_norm, emb.data)
-        d_final = poincare_distance_torch(emb).cpu().numpy()
-        coords = emb.cpu().numpy()
-
-    return coords, d_final
-
-
-def fit_euclidean(D_target, dim=2, lr=0.03, n_epochs=600, seed=42):
-    torch.manual_seed(seed)
-    n = D_target.shape[0]
-    emb = nn.Parameter(torch.randn(n, dim) * 0.5)
-    optimizer = optim.Adam([emb], lr=lr)
-
-    target_t = torch.tensor(D_target, dtype=torch.float32)
-    triu_idx = torch.triu_indices(n, n, offset=1)
-    d_true = target_t[triu_idx[0], triu_idx[1]].clamp(min=1e-3)
-
-    for epoch in range(n_epochs):
-        optimizer.zero_grad()
-        sq_dist = torch.sum((emb.unsqueeze(1) - emb.unsqueeze(0)) ** 2, dim=-1)
-        d_pred = torch.sqrt(sq_dist.clamp(min=1e-8))
-        d_p_triu = d_pred[triu_idx[0], triu_idx[1]]
-        loss = torch.mean(((d_p_triu - d_true) / d_true) ** 2)
-        loss.backward()
-        optimizer.step()
-
-    with torch.no_grad():
-        sq_dist = torch.sum((emb.unsqueeze(1) - emb.unsqueeze(0)) ** 2, dim=-1)
-        d_final = torch.sqrt(sq_dist.clamp(min=1e-8)).cpu().numpy()
-        coords = emb.cpu().numpy()
-
-    return coords, d_final
+from embedding_fit import (
+    fit_poincare,
+    fit_euclidean,
+    evaluate_embedding_quality,
+    compute_gromov_hyperbolicity_common_metric
+)
 
 
 # =============================================================================
@@ -699,8 +639,10 @@ def stage_3_test_neural_geometry(stage2_neural_bundle, ref_rdms, df_rel, sub_ses
         coords_h, dist_h = fit_poincare(grand_ang, dim=d, lr=0.03, n_epochs=600)
         coords_e, dist_e = fit_euclidean(grand_ang, dim=d, lr=0.03, n_epochs=600)
 
-        distort_h = float(np.mean(np.abs(dist_h[TRIU] - tri_true) / tri_true))
-        distort_e = float(np.mean(np.abs(dist_e[TRIU] - tri_true) / tri_true))
+        qual_h = evaluate_embedding_quality(grand_ang, dist_h)
+        qual_e = evaluate_embedding_quality(grand_ang, dist_e)
+        distort_h = qual_h["stress"]
+        distort_e = qual_e["stress"]
 
         rho_h, _ = rdm_corr(dist_h, grand_ang, "spearman")
         rho_e, _ = rdm_corr(dist_e, grand_ang, "spearman")
@@ -768,9 +710,11 @@ def stage_4_compare_embeddings(stage2_neural_bundle, ref_rdms, seeds=(42, 123, 9
                     trained_embeddings[f"{target_name}_hyp_{d}"] = (coords_h, dist_h)
                     trained_embeddings[f"{target_name}_euc_{d}"] = (coords_e, dist_e)
 
-                # 1. Reconstruction Distortion
-                distort_h = float(np.mean(np.abs(dist_h[TRIU] - tri_true) / tri_true))
-                distort_e = float(np.mean(np.abs(dist_e[TRIU] - tri_true) / tri_true))
+                # 1. Reconstruction Distortion (Canonical Normalized Stress)
+                qual_h = evaluate_embedding_quality(D_target, dist_h)
+                qual_e = evaluate_embedding_quality(D_target, dist_e)
+                distort_h = qual_h["stress"]
+                distort_e = qual_e["stress"]
 
                 # 2. Rank preservation
                 rho_h, _ = rdm_corr(dist_h, D_target, "spearman")

@@ -1,0 +1,5 @@
+run_key,seed,n_avg,head,val_loss,val_top1_acc,val_top5_acc,val_entropy,val_active_classes,wordnet_weighted_error,cat_acc_other
+seed42_avg1,42,1,euclidean,7.354079032897949,0.0085,0.05,7.407195766448974,14,0.9915,0.0085
+seed42_avg1,42,1,cosine,5.482266353607177,0.015,0.056,5.0014135322570805,74,0.985,0.015
+seed42_avg1,42,1,lorentz_fixed,7.20303158569336,0.011,0.05,7.404799839019775,3,0.989,0.011
+seed42_avg1,42,1,lorentz_learnable,7.257781398773194,0.01,0.054,7.406923683166504,1,0.99,0.01
