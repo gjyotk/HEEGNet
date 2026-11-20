@@ -31,13 +31,7 @@ import zipfile
 import time
 from pathlib import Path
 
-# Self-healing python interpreter resolution: ensure environment with sentence_transformers is used
-CLIMB_PYTHON = Path("/tmp/cv13_climb/.venv/bin/python")
-if CLIMB_PYTHON.exists() and sys.executable != str(CLIMB_PYTHON):
-    try:
-        import sentence_transformers
-    except ImportError:
-        os.execv(str(CLIMB_PYTHON), [str(CLIMB_PYTHON)] + sys.argv)
+BASE_DIR = Path(__file__).resolve().parent
 
 # Ensure Matplotlib, Torch, and HuggingFace caches work cleanly
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/mpl_cache")
@@ -54,14 +48,6 @@ import torch.nn as nn
 import torch.optim as optim
 import torchvision.models as models
 import torchvision.transforms as T
-from sentence_transformers import SentenceTransformer
-
-import nltk
-for p in ["/tmp/nltk_data", "/tmp/cv13_climb/.venv/nltk_data", os.path.expanduser("~/nltk_data")]:
-    if p not in nltk.data.path:
-        nltk.data.path.insert(0, p)
-from nltk.corpus import wordnet as wn
-from nltk.corpus import wordnet_ic
 
 import matplotlib
 matplotlib.use("Agg")
@@ -70,7 +56,6 @@ import matplotlib.pyplot as plt
 # =============================================================================
 # Paths & Setup
 # =============================================================================
-BASE_DIR = Path("/usershome/cv13/projects/heeg-net/HEEGNet")
 TEST_IMAGES_DIR = BASE_DIR / "eeg-dataset/stimuli/test_images"
 PREPROCESSED_DIR = BASE_DIR / "eeg-dataset/derivatives/preprocessed_eeg"
 WP1_RDMS_FILE = BASE_DIR / "results/wp1/rdms/validated_neural_rdms_wp1.npz"
@@ -201,6 +186,18 @@ DEFINITIVE_WORDNET_MAP = {
 
 
 def build_validated_concept_table():
+    cached_csv = OUT_TABLES / "wp2_validated_concept_mapping.csv"
+    if cached_csv.exists():
+        print(f"[Validation 1.1] Loading precomputed validated concept table from {cached_csv} ...")
+        df = pd.read_csv(cached_csv)
+        return df, None
+
+    import nltk
+    for p in ["/tmp/nltk_data", "/tmp/cv13_climb/.venv/nltk_data", os.path.expanduser("~/nltk_data")]:
+        if p not in nltk.data.path:
+            nltk.data.path.insert(0, p)
+    from nltk.corpus import wordnet as wn
+
     dirs = sorted([d for d in os.listdir(TEST_IMAGES_DIR) if not d.startswith(".")])
     records = []
     synsets = []
@@ -246,6 +243,11 @@ def build_validated_concept_table():
 # 2. VALIDATE & REBUILD REFERENCE RDMS
 # =============================================================================
 def build_all_validated_reference_rdms(df_concepts, synsets):
+    validated_cache = OUT_RDMS / "reference_rdms_wp2_validated.npz"
+    if validated_cache.exists():
+        print(f"[Validation 1.2] Loading precomputed validated reference RDMs from {validated_cache} ...")
+        return dict(np.load(validated_cache))
+
     print("\n[Validation 1.2] Extracting ResNet visual hierarchy (Layers 1, 2, 3, 4, Avgpool)...")
     model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT).eval()
     
@@ -326,6 +328,7 @@ def build_all_validated_reference_rdms(df_concepts, synsets):
 
     # Semantic RDMs (Sentence-BERT)
     print("\n[Validation 1.3] Computing MiniLM Semantic Embeddings (Names vs Definitions)...")
+    from sentence_transformers import SentenceTransformer
     st = SentenceTransformer("all-MiniLM-L6-v2", local_files_only=True)
     names = [row["display_name"] for _, row in df_concepts.iterrows()]
     defs = [f"{row['display_name']}: {row['wordnet_definition']}" for _, row in df_concepts.iterrows()]
@@ -338,6 +341,7 @@ def build_all_validated_reference_rdms(df_concepts, synsets):
 
     # Hierarchical RDMs (WordNet)
     print("\n[Validation 1.4] Computing WordNet Taxonomic RDMs with Validated Synsets...")
+    from nltk.corpus import wordnet_ic
     brown_ic = wordnet_ic.ic("ic-brown.dat")
     rdm_wup = np.zeros((N_CONCEPTS, N_CONCEPTS), dtype=np.float32)
     rdm_path = np.zeros((N_CONCEPTS, N_CONCEPTS), dtype=np.float32)
@@ -746,7 +750,7 @@ def run_geometry_evaluation(ref_rdms):
               f"| Tax Preservation: Hyp={rho_hyp_tax:.4f} vs Euc={rho_euc_tax:.4f}")
 
     df_geo = pd.DataFrame(geo_records)
-    df_geo.to_csv(OUT_TABLES / "wp2_geometry_comparison.csv", index=False)
+    df_geo.to_csv(OUT_TABLES / "table4_geometry_comparison_riemannian.csv", index=False)
 
     return df_geo, emb_cache
 

@@ -1,9 +1,9 @@
 cohort,contrast,mean_heegnet_pct,mean_eegnet_pct,mean_delta_pct (Hyp - Euc),sem_delta_pct,paired_t_stat,raw_p_value,wilcoxon_stat,wilcoxon_p_value,cohens_d,holm_p_value,significant_holm_05
-Full_Cohort (N=10),Single-Trial Plain,1.306,2.855,-1.549,0.154,-10.072,3.3717697100863682e-06,0.0,0.001953125,-3.185,1e-05,True
-Full_Cohort (N=10),Single-Trial SFUDA vs Plain,1.366,2.855,-1.489,0.169,-8.795,1.0307932887354745e-05,0.0,0.001953125,-2.781,3e-05,True
-Full_Cohort (N=10),20-Rep Averaged Plain,2.033,8.358,-6.325,0.992,-6.377,0.00012868668715012893,0.0,0.001953125,-2.017,0.00018,True
-Full_Cohort (N=10),20-Rep Averaged SFUDA vs Plain,1.862,8.358,-6.496,0.97,-6.698,8.877397867633162e-05,0.0,0.001953125,-2.118,0.00018,True
-HeldOut_Confirmation (N=5),Single-Trial Plain,1.367,3.09,-1.723,0.253,-6.804,0.002438125539218436,0.0,0.0625,-3.043,0.00975,True
-HeldOut_Confirmation (N=5),Single-Trial SFUDA vs Plain,1.413,3.09,-1.677,0.279,-6.009,0.0038611482628453323,0.0,0.0625,-2.687,0.01158,True
-HeldOut_Confirmation (N=5),20-Rep Averaged Plain,1.983,8.183,-6.2,1.431,-4.332,0.012331782382757485,0.0,0.0625,-1.937,0.02219,True
-HeldOut_Confirmation (N=5),20-Rep Averaged SFUDA vs Plain,1.792,8.183,-6.392,1.431,-4.467,0.011096636976275252,0.0,0.0625,-1.998,0.02219,True
+Full_Cohort (N=10),Single-Trial Plain,1.223,3.468,-2.245,0.2,-11.226,1.355546161238824e-06,0.0,0.001953125,-3.55,1e-05,True
+Full_Cohort (N=10),Single-Trial SFUDA vs Plain,1.372,3.468,-2.096,0.212,-9.89,3.924638639798929e-06,0.0,0.001953125,-3.127,1e-05,True
+Full_Cohort (N=10),20-Rep Averaged Plain,1.916,10.979,-9.063,1.155,-7.848,2.5796779305357403e-05,0.0,0.001953125,-2.482,5e-05,True
+Full_Cohort (N=10),20-Rep Averaged SFUDA vs Plain,1.828,10.979,-9.151,1.159,-7.898,2.4530905225488488e-05,0.0,0.001953125,-2.497,5e-05,True
+HeldOut_Confirmation (N=5),Single-Trial Plain,1.313,3.738,-2.426,0.332,-7.313,0.0018594857296559953,0.0,0.0625,-3.271,0.00744,True
+HeldOut_Confirmation (N=5),Single-Trial SFUDA vs Plain,1.503,3.738,-2.236,0.381,-5.865,0.0042189271130020885,0.0,0.0625,-2.623,0.01266,True
+HeldOut_Confirmation (N=5),20-Rep Averaged Plain,1.929,10.892,-8.963,1.735,-5.165,0.006674069965054278,0.0,0.0625,-2.31,0.01335,True
+HeldOut_Confirmation (N=5),20-Rep Averaged SFUDA vs Plain,1.892,10.892,-9.0,1.907,-4.719,0.009178645607072497,0.0,0.0625,-2.11,0.01335,True

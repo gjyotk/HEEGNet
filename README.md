@@ -1,159 +1,120 @@
-# HEEGNET: HYPERBOLIC EMBEDDINGS FOR EEG
+# HEEGNet: Hyperbolic Embeddings for EEG Representational Geometry
 
-This repository contains code accompanying the ICLR 2026 paper *[HEEGNET: HYPERBOLIC EMBEDDINGS FOR EEG](https://openreview.net/forum?id=CNDNRjpVIL)*.
+This repository provides the unified, leak-free implementation of **HEEGNet** applied to the **THINGS-EEG2** dataset (10 subjects, 4 recording sessions, 1,854 visual concepts, 63 electrodes).
 
-## File list
+HEEGNet investigates whether biological brain representations and neural decoding models benefit from **hyperbolic geometry** ($\mathbb{H}^d$) compared to classical flat Euclidean spaces ($\mathbb{R}^d$) when encoding hierarchical semantic structures.
 
-The following files are provided in this repository:
+---
 
-`demo.py` A python file to train and evaluate the proposed model.
+## 1. Architectural Ablation & Model Design
 
-`demo.ipynb` A jupyter notebook to train and evaluate the proposed model.
+The architecture cleanly decouples the EEG feature encoder from the geometric output manifold:
 
-`nets` A folder containing the HEEGNet hybrid hyperbolic deep learning framework.
+1. **Shared EEG Encoder (`ModularEEGNet.encoder`)**:
+   - 2D temporal convolution followed by spatial channel-depthwise convolution over 63 EEG electrodes.
+   - Extracts a continuous latent vector $z \in \mathbb{R}^{48}$ with domain-specific batch normalization across subject sessions.
+2. **Four Matched Geometry Classification Heads**:
+   - **Euclidean Linear Head**: Standard affine transformation $W z + b$.
+   - **Cosine Head**: Cosine similarity on $L_2$-normalized features with temperature scaling $s \cdot \cos(z, w_c)$.
+   - **Lorentz Fixed Head**: Exponential map from $\mathbb{R}^{48}$ to Lorentz manifold $\mathbb{H}^{48}(c=1.0)$, followed by Lorentz multinomial logistic regression (MLR).
+   - **Lorentz Learnable Head**: Exponential map with dynamically learned curvature $c > 0$, scaled by $x' = [x_0, \sqrt{c} x_{1:d}]$ to preserve true $\mathbb{H}^d(c=1.0)$ metric constraints during gradient descent.
 
-`Geometry`, `hsssw`, `lib`  three folders contain hyperbolic space operations. `lib` defines hyperbolic neural networks, 'hsssw' defines optimal transport on the hyperbolic manifold, and 'Geometry' defines the Lorentz batch normalization operation.
+---
 
-More detail instructions  are described in the `demo.ipynb` notebook.
+## 2. Mathematical Rigor & Metric Standards
 
-## Prepare the python virtual environment
+- **Metric Space Validation**:
+  - Raw correlation distance ($1 - r$) violates triangle inequality ($>2.5\%$ violations on empirical EEG).
+  - Angular distance $d(u,v) = \frac{\arccos(r)}{\pi}$ and normalized Euclidean distance are proven strict metric spaces ($0.0\%$ violations).
+- **Standardized Gromov $\delta$-Hyperbolicity**:
+  - Measured on quadruplets $(x, y, z, w)$ with sorted distance sums $S_{(1)} \ge S_{(2)} \ge S_{(3)}$.
+  - Standardized as $\delta_{\text{norm}} = \frac{\text{median}(\delta)}{\text{diameter}(D)}$ with 95% bootstrap confidence intervals over concepts.
+- **Riemannian Optimization**:
+  - Hyperbolic embeddings utilize true `geoopt.optim.RiemannianAdam` on `geoopt.PoincareBall(c=1.0)`.
+  - Avoids boundary saturation and optimization collapse under biological noise.
 
-All dependencies are managed with the `conda` package manager.
-Please follow the user guide to [install](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html) `conda`.
+---
 
-Once the setup is completed, the dependencies can be installed in a new virtual environment.
-
-Open a jupyter notebook and run it.
-
-
-
-## Apply HEEGNet to other datasets
-
-### Domain-Specific Normalization
-In this project, we define a **domain** as a **subject–session pair**, i.e., each recording session of each subject is treated as an independent domain.
-
-Formally, each EEG sample is associated with:
-- `subject_id`: the biological participant,
-- `session_id`: the recording session index of that subject,
-- `domain_id = (subject_id, session_id)`.
-
-During training, **Domain-Specific Batch Normalization** maintains separate running statistics (mean and variance) for each `domain_id`.  
-This allows the model to explicitly capture distribution shifts across different recording sessions.
-
-### Cross-Subject Cross-Validation Protocol
-
-For evaluation, we adopt a **group-wise cross-validation strategy** where:
-- the grouping variable is `subject_id`,
-- all sessions of the same subject are strictly assigned to either the training set or the test set,
-- no subject appears in both splits.
-
-This protocol corresponds to a **cross-subject generalization setting**, while still allowing **session-level domain alignment** within the training data.
-
-### Cross-Session Cross-Validation Protocol 
-
-In addition to the cross-subject setting, we also support the **cross-session generalization setting**.  
-In this case:
-- the grouping variable is `session_id`,
-- all samples from one session are used as the test domain,
-- remaining sessions are used for training.
-
-This protocol evaluates the model’s ability to generalize across different recording sessions **within the same subject**.
-
-
-### Design Rationale in cross-subject setting
-Although one could alternatively define each subject as a domain, we note that using **session-wise domains** leads to better performance.  
-This is because session-wise domain modeling explicitly addresses **cross-session non-stationarity**, which is also a source of distribution shift in EEG data.
-
-### Example of the usage
-```
-#network and training configuration
-cfg = dict(
-    epochs = 100,
-    batch_size_train = 50,
-    domains_per_batch = 5,
-    validation_size = 0.2,
-    evaluation = 'inter-subject'
-    dtype = torch.float64,
-    training=True, 
-    lr=0.001,
-    input_align= True, #! To perform the input space alignment or not
-    weight_decay=1e-4,
-    swd_weight=0.01, #! Loss weight for the stage two gaussian alignment
-    mdl_kwargs = dict( 
-    bnorm_dispersion=bn.BatchNormDispersion.SCALAR, 
-    domain_adaptation=True #! To perform domains-specific batch normalization on hyperbolic maniold or not
-)
-)
-
-# add datadependen model kwargs
-mdl_kwargs = deepcopy(cfg['mdl_kwargs'])
-mdl_kwargs['num_classes'] = n_classes
-mdl_kwargs['num_electrodes'] = X.shape[1]
-mdl_kwargs['chunk_size'] = X.shape[2]
-mdl_kwargs['domains'] = domain.unique()
-
-# create the model and training configuration
-model = HEEGNet(device=device,dtype=cfg['dtype'],**mdl_kwargs).to(device=device, dtype=cfg['dtype'])
-
-# early stopping
-es = EarlyStopping(metric='val_loss', higher_is_better=False, patience=20, verbose=False)
-
-#  hyperbolic maniold batch normalization scheduler
-bn_sched = MomentumBatchNormScheduler(
-    epochs=cfg['epochs']-10,
-    bs0=cfg['batch_size_train'],
-    bs=cfg['batch_size_train']/cfg['domains_per_batch'], 
-    tau0=0.85
-)
-
-# create the trainer
-trainer = Trainer(
-    max_epochs= cfg['epochs'],
-    min_epochs= 70,
-    callbacks=[es,bn_sched],
-    loss=torch.nn.CrossEntropyLoss(),
-    device=device, 
-    dtype=torch.float64,
-    swd_weight=cfg['swd_weight'],
-    lr=cfg['lr'],
-)
+## 3. Directory Layout
 
 ```
-
-
-
-## Emotion recognition Experiment
-In order to use this dataset, the download folder `Processed_data` (download from this URL: [https://www.synapse.org/#!Synapse:syn50615881]) 
-is required, containing the following files:
-Processed_data/
-├── sub000.pkl
-├── sub001.pkl
-├── sub002.pkl
-└── ...
-
-## License
-
-CC-BY-NC-4.0
-
-You are free to:
-- Modify
-- Distribute
-- Use privately
-
-Under the following conditions:
-- Attribution required
-- **No commercial use**
-
-## Cite
-```
-@inproceedings{li2026heegnet,
-  title={HEEGNet: Hyperbolic Embeddings for EEG},
-  author={Li, Shanglin and Chu, Shiwen and Ko{\c{c}}, Okan and Ding, Yi and Zhao, Qibin and Kawanabe, Motoaki and Chen, Ziheng},
-  booktitle={The Fourteenth International Conference on Learning Representations},
-  year={2026}
-}
+HEEGNet/
+├── analysis/               # Shared analysis modules (Frechet mean, etc.)
+│   └── frechet.py
+├── nets/                   # Neural network architectures and functionals
+│   ├── model.py            # Canonical ModularEEGNet and 4 heads
+│   └── functionals.py      # Euler alignment and SWD loss
+├── data.py                 # Canonical subject data loader (load_subject_data)
+├── synthetic.py            # Canonical tree and flat space generators
+├── embedding_fit.py        # RiemannianAdam and standardized Gromov metrics
+├── neural_geometry_and_embeddings.py  # Stages 1-3 independent geometry
+├── calibrate_hyperbolic_embeddings.py  # Synthetic calibration & WordNet
+├── run_full_cv_experiment.py           # 60-fold LOSO CV orchestrator
+├── train_four_head_ablation.py         # Four-head geometry ablation
+├── extract_cv_representations.py       # Out-of-sample feature extraction
+├── evaluate_geometry_ablation.py       # Head alignment & Gromov comparison
+└── results/
+    ├── neural_geometry/    # Stages 1-3 tables, RDMs, and Figures 8 & 9
+    ├── rigorous_evaluation/# 60-fold CV results, models, and Figure 17
+    ├── four_head/          # Four-head ablation models, RDMs, and Figure 21
+    └── diagnostics/        # EEG signal reliability & noise scaling
 ```
 
+---
 
+## 4. Recommended Execution Pipeline
 
+To run the full experimental pipeline from scratch:
 
+### Step 1: Independent Neural Representational Geometry (Stages 1–3)
+Evaluates metric axioms, angular distance RDMs, split-half reliability, and Gromov hyperbolicity:
+```bash
+python neural_geometry_and_embeddings.py
+```
+*Outputs: Figures 8 & 9, `stage3_gromov_hyperbolicity_benchmarks.csv` in `results/neural_geometry/`.*
+
+### Step 2: Synthetic Tree Calibration & Optimization Verification
+Establishes whether Riemannian Adam recovers tree vs flat structure under biological noise:
+```bash
+python calibrate_hyperbolic_embeddings.py
+```
+*Outputs: Figure 20, `synthetic_tree_calibration_results.csv`.*
+
+### Step 3: Full Cross-Subject Cross-Validation (60 Folds)
+Runs leave-one-subject-out CV across 10 subjects and 3 random seeds (42, 123, 999), evaluating both single-trial and 20-repetition averaged pseudo-trial decoding:
+```bash
+AVAILABLE_GPUS="0,1,2,3,4,5" python run_full_cv_experiment.py
+```
+*Outputs: Figure 17, `table3_cross_subject_decoding_cv.csv` in `results/rigorous_evaluation/`.*
+
+### Step 4: Four-Head Geometric Ablation
+Trains the shared encoder across the 4 classification heads under identical optimization budget:
+```bash
+python train_four_head_ablation.py
+```
+*Outputs: Checkpoints and distinct test RDMs in `results/four_head/`.*
+
+### Step 5: Leak-Free Representation Extraction & Head Evaluation
+Extracts out-of-sample representations and evaluates geometric alignment with WordNet and neural targets:
+```bash
+python extract_cv_representations.py
+python evaluate_geometry_ablation.py
+```
+*Outputs: Figure 21, `table5_geometry_head_ablation.csv` in `results/four_head/`.*
+
+---
+
+## 5. Environment & Requirements
+
+Create and activate the environment:
+```bash
+conda env create -f environment.yaml
+conda activate heegnet
+pip install -e .
+```
+
+Core dependencies:
+- Python 3.10
+- PyTorch >= 2.0
+- Geoopt >= 0.5.0
+- Scipy, Scikit-learn, Pandas, Matplotlib, Seaborn

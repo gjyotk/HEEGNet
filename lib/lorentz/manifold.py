@@ -1,7 +1,7 @@
 import torch
 
-from lib.geoopt import Lorentz
-from lib.geoopt.manifolds.lorentz import math
+from geoopt import Lorentz
+from geoopt.manifolds.lorentz import math
 import torch.nn.functional as F
 
 

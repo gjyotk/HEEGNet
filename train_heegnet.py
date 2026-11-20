@@ -1,1 +1,0 @@
-train_heegnet_and_evaluate_geometry.py

@@ -1,6 +1,51 @@
 [
   {
-    "subject": "sub-06",
+    "subject": "sub-01",
+    "model_key": "cv_euclidean_sub01_seed123_fold9",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 1.3193,
+    "rdm_max_dist": 4.1125,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-01",
+    "model_key": "cv_euclidean_sub01_seed42_fold9",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 1.2297,
+    "rdm_max_dist": 3.8247,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-01",
+    "model_key": "cv_heegnet_sub01_seed123_fold9",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.1396,
+    "rdm_max_dist": 0.6069,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-01",
     "model_key": "cv_heegnet_sub01_seed42_fold9",
     "arch": "HEEGNet",
     "geometry": "lorentz",
@@ -9,8 +54,338 @@
       200,
       200
     ],
-    "rdm_mean_dist": 0.3706,
-    "rdm_max_dist": 1.2939,
+    "rdm_mean_dist": 0.1414,
+    "rdm_max_dist": 0.5867,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-01",
+    "model_key": "cv_heegnet_sub01_seed999_fold9",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.1264,
+    "rdm_max_dist": 0.5605,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-02",
+    "model_key": "cv_euclidean_sub02_seed123_fold8",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 1.4317,
+    "rdm_max_dist": 3.7584,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-02",
+    "model_key": "cv_euclidean_sub02_seed42_fold8",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 1.3703,
+    "rdm_max_dist": 3.6329,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-02",
+    "model_key": "cv_heegnet_sub02_seed123_fold8",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.1646,
+    "rdm_max_dist": 0.5908,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-02",
+    "model_key": "cv_heegnet_sub02_seed42_fold8",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.1624,
+    "rdm_max_dist": 0.5866,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-02",
+    "model_key": "cv_heegnet_sub02_seed999_fold8",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.1575,
+    "rdm_max_dist": 0.5454,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-03",
+    "model_key": "cv_euclidean_sub03_seed123_fold7",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 1.2833,
+    "rdm_max_dist": 3.1743,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-03",
+    "model_key": "cv_euclidean_sub03_seed42_fold7",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 1.1831,
+    "rdm_max_dist": 2.8963,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-03",
+    "model_key": "cv_heegnet_sub03_seed123_fold7",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.0997,
+    "rdm_max_dist": 0.4094,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-03",
+    "model_key": "cv_heegnet_sub03_seed42_fold7",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.0855,
+    "rdm_max_dist": 0.3028,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-04",
+    "model_key": "cv_euclidean_sub04_seed123_fold6",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 1.4994,
+    "rdm_max_dist": 4.1786,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-04",
+    "model_key": "cv_euclidean_sub04_seed42_fold6",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 1.3988,
+    "rdm_max_dist": 3.7853,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-04",
+    "model_key": "cv_heegnet_sub04_seed123_fold6",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.1482,
+    "rdm_max_dist": 0.6006,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-04",
+    "model_key": "cv_heegnet_sub04_seed42_fold6",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.1364,
+    "rdm_max_dist": 0.5957,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-05",
+    "model_key": "cv_euclidean_sub05_seed123_fold5",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 1.2314,
+    "rdm_max_dist": 3.396,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-05",
+    "model_key": "cv_euclidean_sub05_seed42_fold5",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 1.1378,
+    "rdm_max_dist": 2.9753,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-05",
+    "model_key": "cv_heegnet_sub05_seed123_fold5",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.1363,
+    "rdm_max_dist": 0.5193,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-05",
+    "model_key": "cv_heegnet_sub05_seed42_fold5",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.1511,
+    "rdm_max_dist": 0.564,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-06",
+    "model_key": "cv_euclidean_sub06_seed123_fold4",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 1.3605,
+    "rdm_max_dist": 3.4763,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-06",
+    "model_key": "cv_euclidean_sub06_seed42_fold4",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 1.4196,
+    "rdm_max_dist": 3.5889,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-06",
+    "model_key": "cv_heegnet_sub06_seed123_fold4",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.3026,
+    "rdm_max_dist": 0.8553,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-06",
+    "model_key": "cv_heegnet_sub06_seed42_fold4",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.1482,
+    "rdm_max_dist": 0.5241,
     "is_symmetric": true,
     "zero_diagonal": true
   },
@@ -45,8 +420,98 @@
     "zero_diagonal": true
   },
   {
+    "subject": "sub-06",
+    "model_key": "4head_euclidean",
+    "arch": "ModularEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.878,
+    "rdm_max_dist": 2.5353,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-06",
+    "model_key": "4head_cosine",
+    "arch": "ModularEEGNet",
+    "geometry": "cosine",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.1087,
+    "rdm_max_dist": 0.7458,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-06",
+    "model_key": "4head_lorentz_fixed",
+    "arch": "ModularEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.4542,
+    "rdm_max_dist": 1.4033,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-06",
+    "model_key": "4head_lorentz_learnable",
+    "arch": "ModularEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.4556,
+    "rdm_max_dist": 1.4183,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
     "subject": "sub-07",
-    "model_key": "cv_heegnet_sub01_seed42_fold9",
+    "model_key": "cv_euclidean_sub07_seed123_fold3",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 1.5586,
+    "rdm_max_dist": 4.3704,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-07",
+    "model_key": "cv_euclidean_sub07_seed42_fold3",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 1.5332,
+    "rdm_max_dist": 4.2354,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-07",
+    "model_key": "cv_heegnet_sub07_seed123_fold3",
     "arch": "HEEGNet",
     "geometry": "lorentz",
     "feature_dim": 49,
@@ -54,8 +519,23 @@
       200,
       200
     ],
-    "rdm_mean_dist": 0.39,
-    "rdm_max_dist": 1.4289,
+    "rdm_mean_dist": 0.1613,
+    "rdm_max_dist": 0.6272,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-07",
+    "model_key": "cv_heegnet_sub07_seed42_fold3",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.1815,
+    "rdm_max_dist": 0.7256,
     "is_symmetric": true,
     "zero_diagonal": true
   },
@@ -90,8 +570,98 @@
     "zero_diagonal": true
   },
   {
+    "subject": "sub-07",
+    "model_key": "4head_euclidean",
+    "arch": "ModularEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.9571,
+    "rdm_max_dist": 3.0507,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-07",
+    "model_key": "4head_cosine",
+    "arch": "ModularEEGNet",
+    "geometry": "cosine",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.0644,
+    "rdm_max_dist": 0.4547,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-07",
+    "model_key": "4head_lorentz_fixed",
+    "arch": "ModularEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.4899,
+    "rdm_max_dist": 1.5097,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-07",
+    "model_key": "4head_lorentz_learnable",
+    "arch": "ModularEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.4942,
+    "rdm_max_dist": 1.5379,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
     "subject": "sub-08",
-    "model_key": "cv_heegnet_sub01_seed42_fold9",
+    "model_key": "cv_euclidean_sub08_seed123_fold2",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 1.5801,
+    "rdm_max_dist": 4.6105,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-08",
+    "model_key": "cv_euclidean_sub08_seed42_fold2",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 1.4603,
+    "rdm_max_dist": 4.3013,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-08",
+    "model_key": "cv_heegnet_sub08_seed123_fold2",
     "arch": "HEEGNet",
     "geometry": "lorentz",
     "feature_dim": 49,
@@ -99,8 +669,23 @@
       200,
       200
     ],
-    "rdm_mean_dist": 0.3348,
-    "rdm_max_dist": 1.3417,
+    "rdm_mean_dist": 0.15,
+    "rdm_max_dist": 0.618,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-08",
+    "model_key": "cv_heegnet_sub08_seed42_fold2",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.147,
+    "rdm_max_dist": 0.5814,
     "is_symmetric": true,
     "zero_diagonal": true
   },
@@ -135,8 +720,98 @@
     "zero_diagonal": true
   },
   {
+    "subject": "sub-08",
+    "model_key": "4head_euclidean",
+    "arch": "ModularEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.9255,
+    "rdm_max_dist": 2.8723,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-08",
+    "model_key": "4head_cosine",
+    "arch": "ModularEEGNet",
+    "geometry": "cosine",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.082,
+    "rdm_max_dist": 0.6985,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-08",
+    "model_key": "4head_lorentz_fixed",
+    "arch": "ModularEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.424,
+    "rdm_max_dist": 1.4596,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-08",
+    "model_key": "4head_lorentz_learnable",
+    "arch": "ModularEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.4242,
+    "rdm_max_dist": 1.4481,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
     "subject": "sub-09",
-    "model_key": "cv_heegnet_sub01_seed42_fold9",
+    "model_key": "cv_euclidean_sub09_seed123_fold1",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 1.1953,
+    "rdm_max_dist": 3.3909,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-09",
+    "model_key": "cv_euclidean_sub09_seed42_fold1",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 1.1512,
+    "rdm_max_dist": 3.0778,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-09",
+    "model_key": "cv_heegnet_sub09_seed123_fold1",
     "arch": "HEEGNet",
     "geometry": "lorentz",
     "feature_dim": 49,
@@ -144,8 +819,23 @@
       200,
       200
     ],
-    "rdm_mean_dist": 0.3415,
-    "rdm_max_dist": 1.2816,
+    "rdm_mean_dist": 0.1314,
+    "rdm_max_dist": 0.5203,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-09",
+    "model_key": "cv_heegnet_sub09_seed42_fold1",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.1473,
+    "rdm_max_dist": 0.5621,
     "is_symmetric": true,
     "zero_diagonal": true
   },
@@ -180,8 +870,98 @@
     "zero_diagonal": true
   },
   {
+    "subject": "sub-09",
+    "model_key": "4head_euclidean",
+    "arch": "ModularEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.8186,
+    "rdm_max_dist": 2.4429,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-09",
+    "model_key": "4head_cosine",
+    "arch": "ModularEEGNet",
+    "geometry": "cosine",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.0883,
+    "rdm_max_dist": 0.7013,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-09",
+    "model_key": "4head_lorentz_fixed",
+    "arch": "ModularEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.4094,
+    "rdm_max_dist": 1.3481,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-09",
+    "model_key": "4head_lorentz_learnable",
+    "arch": "ModularEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.4121,
+    "rdm_max_dist": 1.3655,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
     "subject": "sub-10",
-    "model_key": "cv_heegnet_sub01_seed42_fold9",
+    "model_key": "cv_euclidean_sub10_seed123_fold0",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 1.3675,
+    "rdm_max_dist": 3.6513,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-10",
+    "model_key": "cv_euclidean_sub10_seed42_fold0",
+    "arch": "EuclideanEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 1.3503,
+    "rdm_max_dist": 3.6781,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-10",
+    "model_key": "cv_heegnet_sub10_seed123_fold0",
     "arch": "HEEGNet",
     "geometry": "lorentz",
     "feature_dim": 49,
@@ -189,8 +969,23 @@
       200,
       200
     ],
-    "rdm_mean_dist": 0.3503,
-    "rdm_max_dist": 1.2702,
+    "rdm_mean_dist": 0.1436,
+    "rdm_max_dist": 0.5483,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-10",
+    "model_key": "cv_heegnet_sub10_seed42_fold0",
+    "arch": "HEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.1242,
+    "rdm_max_dist": 0.4829,
     "is_symmetric": true,
     "zero_diagonal": true
   },
@@ -221,6 +1016,66 @@
     ],
     "rdm_mean_dist": 0.9078,
     "rdm_max_dist": 2.1475,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-10",
+    "model_key": "4head_euclidean",
+    "arch": "ModularEEGNet",
+    "geometry": "euclidean",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.9137,
+    "rdm_max_dist": 2.5552,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-10",
+    "model_key": "4head_cosine",
+    "arch": "ModularEEGNet",
+    "geometry": "cosine",
+    "feature_dim": 48,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.0726,
+    "rdm_max_dist": 0.5502,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-10",
+    "model_key": "4head_lorentz_fixed",
+    "arch": "ModularEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.4357,
+    "rdm_max_dist": 1.3691,
+    "is_symmetric": true,
+    "zero_diagonal": true
+  },
+  {
+    "subject": "sub-10",
+    "model_key": "4head_lorentz_learnable",
+    "arch": "ModularEEGNet",
+    "geometry": "lorentz",
+    "feature_dim": 49,
+    "rdm_shape": [
+      200,
+      200
+    ],
+    "rdm_mean_dist": 0.4374,
+    "rdm_max_dist": 1.3827,
     "is_symmetric": true,
     "zero_diagonal": true
   }

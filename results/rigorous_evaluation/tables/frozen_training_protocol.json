@@ -1,6 +1,6 @@
 {
   "experiment": "rigorous_methodological_validation_and_heegnet",
-  "frozen_timestamp": "2026-11-18T18:56:36Z",
+  "frozen_timestamp": "2026-11-20T13:15:44Z",
   "random_seed": 42,
   "cohorts": {
     "train_subjects": [

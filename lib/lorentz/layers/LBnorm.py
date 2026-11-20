@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from lib.geoopt import ManifoldParameter
+from geoopt import ManifoldParameter
 from lib.lorentz.manifold import CustomLorentz
 
 

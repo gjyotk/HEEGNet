@@ -47,7 +47,7 @@ from sklearn.decomposition import PCA
 # ==============================================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PREPROCESSED_DIR = os.path.join(BASE_DIR, "eeg-dataset", "derivatives", "preprocessed_eeg")
-RESULTS_DIR = os.path.join(BASE_DIR, "results")
+RESULTS_DIR = os.path.join(BASE_DIR, "results", "diagnostics")
 FIG_DIR = os.path.join(RESULTS_DIR, "figures")
 TAB_DIR = os.path.join(RESULTS_DIR, "tables")
 os.makedirs(FIG_DIR, exist_ok=True)
@@ -74,15 +74,12 @@ TW_SHORT = ["50–190ms\n(Early)", "100–290ms\n(Category)", "50–390ms\n(Broa
             "0–790ms\n(Full)", "400–790ms\n(Late)"]
 
 
+from data import load_subject_data as _load_subject_data
+
+
 def load_subject_data(subject_id: int):
-    """Load full preprocessed test data (200 concepts, 80 reps, 63 ch, 100 times)."""
-    zf_name = f"sub-{subject_id:02d}__63_channels.zip"
-    zf_path = os.path.join(PREPROCESSED_DIR, zf_name)
-    npy_name = f"sub-{subject_id:02d}__63_channels/preprocessed_eeg_test.npy"
-    with zipfile.ZipFile(zf_path) as zf:
-        with zf.open(npy_name) as fp:
-            raw_obj = np.load(fp, allow_pickle=True).item()
-    return raw_obj["preprocessed_eeg_data"], list(raw_obj["ch_names"][:63]), raw_obj["times"]
+    """Load full preprocessed test data via canonical data.py."""
+    return _load_subject_data(subject_id, preprocessed_dir=PREPROCESSED_DIR, return_times=True)
 
 
 def get_channel_sets(ch_names):

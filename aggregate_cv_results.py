@@ -35,20 +35,14 @@ import json
 import argparse
 from pathlib import Path
 
-# Self-healing python interpreter resolution: ensure .venv python is used
 BASE_DIR = Path(__file__).resolve().parent
-VENV_PYTHON = BASE_DIR / ".venv/bin/python"
-if VENV_PYTHON.exists() and sys.executable != str(VENV_PYTHON):
-    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON)] + sys.argv)
 
 import numpy as np
 import pandas as pd
 from scipy import stats
 
 # Output Directories
-HEEGNET_TABLES = BASE_DIR / "results/heegnet/tables"
 RIGOROUS_TABLES = BASE_DIR / "results/rigorous_evaluation/tables"
-HEEGNET_TABLES.mkdir(parents=True, exist_ok=True)
 RIGOROUS_TABLES.mkdir(parents=True, exist_ok=True)
 
 SOURCE_CSV = RIGOROUS_TABLES / "cv_decoding_all_subjects_3seeds.csv"
@@ -88,27 +82,30 @@ def compute_cohens_d(x, y):
 
 def load_all_cv_data():
     """Loads all CV JSON files or source CSV and returns a consolidated DataFrame."""
+    cv_dir = BASE_DIR / "results/rigorous_evaluation/cv"
+    json_files = sorted(list(cv_dir.glob("cv_results_things_eeg2_*.json")) + list(BASE_DIR.glob("cv_results_things_eeg2_*.json")))
+    # Deduplicate paths
+    json_files = sorted(list(set(json_files)))
+    if json_files:
+        print(f"Aggregating from {len(json_files)} individual CV JSON files...")
+        records = []
+        for f in json_files:
+            try:
+                with open(f, "r") as fp:
+                    data = json.load(fp)
+                    if isinstance(data, list):
+                        records.extend(data)
+                    elif isinstance(data, dict):
+                        records.append(data)
+            except Exception as e:
+                print(f"Warning: Failed to load {f}: {e}")
+        df = pd.DataFrame(records)
+        return df
+
     if SOURCE_CSV.exists():
         print(f"Loading full CV database from: {SOURCE_CSV}")
         df = pd.read_csv(SOURCE_CSV)
         return df
-
-    print("Source CSV not found, aggregating from individual JSON files...")
-    json_files = sorted(glob.glob("cv_results_things_eeg2_*.json"))
-    records = []
-    for f in json_files:
-        try:
-            with open(f, "r") as fp:
-                data = json.load(fp)
-                if isinstance(data, list):
-                    records.extend(data)
-                elif isinstance(data, dict):
-                    records.append(data)
-        except Exception as e:
-            print(f"Warning: Failed to load {f}: {e}")
-
-    df = pd.DataFrame(records)
-    return df
 
 
 # ==============================================================================
@@ -273,14 +270,10 @@ def aggregate_publication_benchmark():
     print(df_paired[["cohort", "contrast", "mean_heegnet_pct", "mean_eegnet_pct", "mean_delta_pct (Hyp - Euc)", "paired_t_stat", "holm_p_value", "cohens_d"]].to_string(index=False))
 
     # 5. Export Consolidated Tables
-    pub_table_csv = HEEGNET_TABLES / "consolidated_cv_decoding_publication_table.csv"
-    paired_table_csv = HEEGNET_TABLES / "consolidated_cv_paired_tests.csv"
+    pub_table_csv = RIGOROUS_TABLES / "cv_decoding_publication_summary.csv"
+    paired_table_csv = RIGOROUS_TABLES / "cv_decoding_paired_tests_summary.csv"
     df_summary.to_csv(pub_table_csv, index=False)
     df_paired.to_csv(paired_table_csv, index=False)
-
-    # Also synchronize to rigorous_evaluation/tables/
-    df_summary.to_csv(RIGOROUS_TABLES / "cv_decoding_publication_summary.csv", index=False)
-    df_paired.to_csv(RIGOROUS_TABLES / "cv_decoding_paired_tests_summary.csv", index=False)
 
     print("\n" + "=" * 80)
     print("CONSOLIDATED PUBLICATION TABLE EXPORTED SUCCESSFULLY:")

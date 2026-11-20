@@ -29,11 +29,7 @@ import os
 import sys
 from pathlib import Path
 
-# Self-healing python interpreter resolution: ensure .venv python is used
 BASE_DIR_PATH = Path(__file__).resolve().parent
-VENV_PYTHON = BASE_DIR_PATH / ".venv/bin/python"
-if VENV_PYTHON.exists() and sys.executable != str(VENV_PYTHON):
-    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON)] + sys.argv)
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/mpl_cache")
 os.makedirs("/tmp/mpl_cache", exist_ok=True)

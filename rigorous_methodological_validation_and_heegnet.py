@@ -31,11 +31,7 @@ import os
 import sys
 from pathlib import Path
 
-# Self-healing python interpreter resolution: ensure .venv python is used
 BASE_DIR_PATH = Path(__file__).resolve().parent
-VENV_PYTHON = BASE_DIR_PATH / ".venv/bin/python"
-if VENV_PYTHON.exists() and sys.executable != str(VENV_PYTHON):
-    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON)] + sys.argv)
 
 os.environ["MPLCONFIGDIR"] = "/tmp/mpl_cache"
 os.makedirs("/tmp/mpl_cache", exist_ok=True)
@@ -65,9 +61,11 @@ from torch.utils.data import TensorDataset, DataLoader
 BASE_DIR = Path(os.environ.get("HEEGNET_DIR", Path(__file__).resolve().parent))
 sys.path.insert(0, str(BASE_DIR))
 
-from nets.model import HEEGNet
+from nets.model import HEEGNet, EuclideanEEGNet
 import nets.functionals as fn
 from lib.lorentz.manifold import CustomLorentz
+from analysis.frechet import compute_lorentz_frechet_mean
+from embedding_fit import compute_gromov_hyperbolicity_common_metric
 
 warnings.filterwarnings("ignore")
 
@@ -81,7 +79,7 @@ MODELS_DIR = RESULTS_DIR / "models"
 for d in [TABLES_DIR, FIGURES_DIR, RDMS_DIR, MODELS_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
-DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device(os.environ.get("DEVICE", "cuda:6" if torch.cuda.is_available() else "cpu"))
 PREPROCESSED_DIR = BASE_DIR / "eeg-dataset/derivatives/preprocessed_eeg"
 STAGE1_RDM_PATH = BASE_DIR / "results/neural_geometry/rdms/stage1_final_reference_rdms.npz"
 STAGE2_RDM_PATH = BASE_DIR / "results/neural_geometry/rdms/stage2_neural_rdms.npz"
@@ -160,45 +158,7 @@ def run_leak_free_stage4_benchmark():
     return df_splits, summary
 
 
-# ==============================================================================
-# SECTION 2: MATCHED EUCLIDEAN EEGNET BASELINE ARCHITECTURE
-# ==============================================================================
-
-class EuclideanEEGNet(nn.Module):
-    """
-    Exact structural Euclidean counterpart of HEEGNet.
-    Uses identical block1 (temporal + depthwise spatial conv) and block2 (separable conv)
-    projecting to a 48-dimensional Euclidean feature space before classification.
-    """
-    def __init__(self, chunk_size=100, num_electrodes=63, F1=8, F2=16, D=2,
-                 num_classes=1654, kernel_1=64, kernel_2=16, dropout=0.25):
-        super().__init__()
-        self.block1 = nn.Sequential(
-            nn.Conv2d(1, F1, (1, kernel_1), stride=1, padding=(0, kernel_1 // 2), bias=False),
-            nn.BatchNorm2d(F1, momentum=0.01, affine=True, eps=1e-3),
-            nn.Conv2d(F1, F1 * D, (num_electrodes, 1), stride=1, padding=(0, 0), groups=F1, bias=False),
-            nn.BatchNorm2d(F1 * D, momentum=0.01, affine=True, eps=1e-3),
-            nn.ELU(),
-            nn.AvgPool2d((1, 4), stride=4),
-            nn.Dropout(p=dropout)
-        )
-        self.block2 = nn.Sequential(
-            nn.Conv2d(F1 * D, F1 * D, (1, kernel_2), stride=1, padding=(0, kernel_2 // 2), bias=False, groups=F1 * D),
-            nn.Conv2d(F1 * D, F2, 1, padding=(0, 0), groups=1, bias=False, stride=1),
-            nn.BatchNorm2d(F2, momentum=0.01, affine=True, eps=1e-3),
-            nn.ELU(),
-            nn.AvgPool2d((1, 8), stride=8),
-            nn.Dropout(p=dropout)
-        )
-        self.classifier = nn.Linear(48, num_classes)
-        
-    def forward(self, x, domains=None):
-        x = x.unsqueeze(1)
-        x = self.block1(x)
-        x = self.block2(x)
-        features = x.flatten(1)  # (batch, 48)
-        logits = self.classifier(features)
-        return logits, features
+# Section 2: EuclideanEEGNet imported canonically from nets.model
 
 
 # ==============================================================================
@@ -852,25 +812,9 @@ def plot_training_diagnostics(df_h, conf_hyp, cat_names, best_ep_hyp, best_ep_eu
 
 
 # ==============================================================================
-# SECTION 5: INTRINSIC RIEMANNIAN FRÉCHET CENTROIDS & EXTRACTION (ISSUES D & E)
+# SECTION 5: INTRINSIC RIEMANNIAN FRÉCHET CENTROIDS & EXTRACTION
 # ==============================================================================
-
-def compute_lorentz_frechet_mean(pts, manifold, tol=1e-5, max_iter=30):
-    """
-    Computes the true Riemannian Fréchet / Karcher mean on the Lorentz hyperboloid
-    via iterative Riemannian gradient descent using log/exp maps with tolerance convergence.
-    pts: (N, 49) tensor on the hyperboloid.
-    """
-    mu = pts.mean(dim=0, keepdim=True)
-    mu = manifold.projx(mu)
-    for _ in range(max_iter):
-        u = manifold.logmap(mu, pts)
-        v = u.mean(dim=0, keepdim=True)
-        v_norm = manifold.norm(v)
-        if v_norm.item() < tol:
-            break
-        mu = manifold.expmap(mu, v)
-    return mu.squeeze(0)
+# compute_lorentz_frechet_mean imported canonically from analysis.frechet
 
 
 def build_mantel_permutation_table(n=200, n_permutations=10000, seed=42):
@@ -920,49 +864,7 @@ def fast_mantel_test(rdm1, rdm2, perm_table):
     return r_obs, p_val, p_exact_str
 
 
-def compute_gromov_hyperbolicity_common_metric(D, n_quadruplets=50000, n_boot=200, seed=42):
-    """
-    Computes Gromov delta-hyperbolicity on a common normalized metric (scaled to median pairwise distance = 1.0)
-    with 95% bootstrap confidence intervals across quadruplets (Issue 7).
-    """
-    np.random.seed(seed)
-    n = D.shape[0]
-    iu = np.triu_indices(n, k=1)
-    median_d = float(np.median(D[iu]))
-    if median_d <= 0:
-        median_d = 1.0
-    D_norm = D / median_d
-    
-    quads = np.random.randint(0, n, size=(n_quadruplets, 4))
-    mask = (quads[:, 0] != quads[:, 1]) & (quads[:, 0] != quads[:, 2]) & (quads[:, 0] != quads[:, 3]) & \
-           (quads[:, 1] != quads[:, 2]) & (quads[:, 1] != quads[:, 3]) & (quads[:, 2] != quads[:, 3])
-    quads = quads[mask]
-    
-    x, y, z, w = quads[:, 0], quads[:, 1], quads[:, 2], quads[:, 3]
-    s1 = D_norm[x, y] + D_norm[z, w]
-    s2 = D_norm[x, z] + D_norm[y, w]
-    s3 = D_norm[x, w] + D_norm[y, z]
-    
-    sums = np.column_stack([s1, s2, s3])
-    sums.sort(axis=1)
-    deltas = (sums[:, 2] - sums[:, 1]) / 2.0
-    
-    boot_means = []
-    n_sample = len(deltas)
-    for _ in range(n_boot):
-        b_idx = np.random.randint(0, n_sample, size=min(n_sample, 5000))
-        boot_means.append(float(np.mean(deltas[b_idx])))
-        
-    ci_low = float(np.percentile(boot_means, 2.5))
-    ci_high = float(np.percentile(boot_means, 97.5))
-    
-    return {
-        "norm_mean_delta": float(deltas.mean()),
-        "norm_p95_delta": float(np.percentile(deltas, 95)),
-        "norm_max_delta": float(deltas.max()),
-        "ci95_low": ci_low,
-        "ci95_high": ci_high
-    }
+# compute_gromov_hyperbolicity_common_metric imported canonically from embedding_fit
 
 
 def extract_subject_level_rdms(model_hyp, model_euc, heldout_subs=[6, 7, 8, 9, 10], n_train_domains=12):
@@ -1373,17 +1275,32 @@ def main():
     val_subs = [4, 5]
     test_subs = [6, 7, 8, 9, 10]
     
-    X_tr, y_tr, d_tr, X_va, y_va, d_va, n_dom = load_multi_subject_training_data(
-        train_subs=train_subs, val_subs=val_subs, test_subs=test_subs
-    )
-    
-    # 3. Change 1 & 2: Matched Training with In-Depth Diagnostics
-    model_hyp, model_euc, history = train_matched_models(
-        X_tr, y_tr, d_tr, X_va, y_va, d_va, n_dom, n_epochs=12
-    )
-    
-    # 4. Subject-Level Extraction & Intrinsic Fréchet Centroids (Points 18–20 & Domain Adaptation)
-    subject_rdms = extract_subject_level_rdms(model_hyp, model_euc, heldout_subs=test_subs, n_train_domains=n_dom)
+    rdm_file = RDMS_DIR / "heldout_subject_rdms.npz"
+    history_file = TABLES_DIR / "matched_training_history.csv"
+
+    if rdm_file.exists() and history_file.exists():
+        print(f"Precomputed held-out subject RDMs found on disk: {rdm_file}")
+        npz = np.load(rdm_file)
+        subject_rdms = {}
+        for sub in test_subs:
+            s_key = f"sub{sub:02d}"
+            subject_rdms[s_key] = {
+                k.replace(f"_{s_key}", ""): npz[k]
+                for k in npz.keys() if k.endswith(f"_{s_key}")
+            }
+        history = pd.read_csv(history_file).to_dict(orient="list")
+    else:
+        X_tr, y_tr, d_tr, X_va, y_va, d_va, n_dom = load_multi_subject_training_data(
+            train_subs=train_subs, val_subs=val_subs, test_subs=test_subs
+        )
+        
+        # 3. Change 1 & 2: Matched Training with In-Depth Diagnostics
+        model_hyp, model_euc, history = train_matched_models(
+            X_tr, y_tr, d_tr, X_va, y_va, d_va, n_dom, n_epochs=12
+        )
+        
+        # 4. Subject-Level Extraction & Intrinsic Fréchet Centroids (Points 18–20 & Domain Adaptation)
+        subject_rdms = extract_subject_level_rdms(model_hyp, model_euc, heldout_subs=test_subs, n_train_domains=n_dom)
     
     # 5. Statistical Rigor: Paired t-tests & 10,000-Permutation Mantel Tests (Points 21–25)
     df_eval, df_stats, df_gromov = run_statistical_evaluation(subject_rdms, heldout_subs=test_subs)

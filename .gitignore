@@ -1,0 +1,40 @@
+# Python bytecode and build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Caches and logs
+/tmp/
+.ipynb_checkpoints/
+logs/
+*.log
+
+# Large model checkpoints and array binaries
+*.pt
+*.pth
+*.npz
+*.npy
+
+# Cross-validation per-fold JSON results (keep consolidated tables)
+cv_results_*.json

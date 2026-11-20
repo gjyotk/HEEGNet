@@ -35,11 +35,7 @@ import sys
 import json
 from pathlib import Path
 
-# Self-healing python interpreter resolution: ensure .venv python is used
 BASE_DIR = Path(__file__).resolve().parent
-VENV_PYTHON = BASE_DIR / ".venv/bin/python"
-if VENV_PYTHON.exists() and sys.executable != str(VENV_PYTHON):
-    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON)] + sys.argv)
 
 import numpy as np
 import pandas as pd
@@ -51,15 +47,25 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 # Paths configuration
-TABLES_DIR = BASE_DIR / "results/heegnet/tables"
-FIGURES_DIR = BASE_DIR / "results/heegnet/figures"
-RDMS_DIR = BASE_DIR / "results/heegnet/rdms"
+FOUR_HEAD_DIR = BASE_DIR / "results/four_head"
+TABLES_DIR = FOUR_HEAD_DIR / "tables"
+FIGURES_DIR = FOUR_HEAD_DIR / "figures"
+RDMS_DIR = FOUR_HEAD_DIR / "rdms"
 TABLES_DIR.mkdir(parents=True, exist_ok=True)
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+RDMS_DIR.mkdir(parents=True, exist_ok=True)
 
 REF_RDMS_PATH = BASE_DIR / "results/neural_geometry/rdms/stage1_final_reference_rdms.npz"
 HELDOUT_RDMS_PATH = RDMS_DIR / "heegnet_heldout_rdms_per_subject.npz"
+if not HELDOUT_RDMS_PATH.exists():
+    legacy_rdm = BASE_DIR / "results/heegnet/rdms/heegnet_heldout_rdms_per_subject.npz"
+    if legacy_rdm.exists():
+        HELDOUT_RDMS_PATH = legacy_rdm
 TRAINING_LOG_PATH = TABLES_DIR / "4head_training_seed42_avg1.csv"
+if not TRAINING_LOG_PATH.exists():
+    legacy_log = BASE_DIR / "results/heegnet/tables/4head_training_seed42_avg1.csv"
+    if legacy_log.exists():
+        TRAINING_LOG_PATH = legacy_log
 
 
 # ==============================================================================
@@ -103,22 +109,31 @@ def evaluate_ablation():
     print("=" * 80)
 
     # 1. Load Reference RDMs
-    print(f"Loading reference RDMs from: {REF_RDMS_PATH}")
-    ref_npz = np.load(REF_RDMS_PATH, allow_pickle=True)
-    if "visual_deep_layer4" not in ref_npz:
-        raise KeyError("visual_deep_layer4 missing from reference RDMs!")
-    if "behavioral_similarity" not in ref_npz:
-        raise KeyError("behavioral_similarity missing from reference RDMs!")
+    if not REF_RDMS_PATH.exists():
+        alt_path = BASE_DIR / "results/wp2/rdms/reference_rdms_wp2_validated.npz"
+        if alt_path.exists():
+            ref_path = alt_path
+        else:
+            ref_path = REF_RDMS_PATH
+    else:
+        ref_path = REF_RDMS_PATH
+    print(f"Loading reference RDMs from: {ref_path}")
+    ref_npz = np.load(ref_path, allow_pickle=True)
+    if "visual_deep_avgpool" not in ref_npz or "hierarchy_wup" not in ref_npz:
+        raise KeyError("Required reference targets visual_deep_avgpool or hierarchy_wup missing from reference RDMs!")
 
     ref_targets = {
         "WordNet_WUP": ref_npz["hierarchy_wup"],
         "WordNet_Path": ref_npz["hierarchy_path"],
         "Deep_Visual_Avgpool": ref_npz["visual_deep_avgpool"],
-        "Deep_Visual_Layer4": ref_npz["visual_deep_layer4"],
-        "Semantic_MiniLM": ref_npz["semantic_names"],
-        "Behavioral_Similarity": ref_npz["behavioral_similarity"]
+        "Semantic_MiniLM": ref_npz["semantic_definitions"] if "semantic_definitions" in ref_npz else ref_npz["semantic_names"],
+        "Low_Level_Visual": ref_npz["visual_low_level_composite"]
     }
-    print(f"Loaded {len(ref_targets)} reference target spaces.")
+    if "visual_layer3" in ref_npz:
+        ref_targets["Visual_Layer3"] = ref_npz["visual_layer3"]
+    if "behavioral_similarity" in ref_npz:
+        ref_targets["Behavioral_Similarity"] = ref_npz["behavioral_similarity"]
+    print(f"Loaded {len(ref_targets)} reference target spaces: {list(ref_targets.keys())}")
 
     # 2. Load Held-Out Subject RDMs
     heldout_npz = np.load(HELDOUT_RDMS_PATH, allow_pickle=True)
@@ -195,19 +210,26 @@ def evaluate_ablation():
         summary_records.append(row)
 
     df_summary = pd.DataFrame(summary_records)
-    print(df_summary[["head", "delta_norm_mean", "r_WordNet_WUP_mean", "r_Deep_Visual_Avgpool_mean", "r_Semantic_MiniLM_mean", "r_Behavioral_Similarity_mean"]].to_string(index=False))
+    disp_cols = ["head", "delta_norm_mean", "r_WordNet_WUP_mean", "r_Deep_Visual_Avgpool_mean", "r_Semantic_MiniLM_mean"]
+    if "r_Behavioral_Similarity_mean" in df_summary.columns:
+        disp_cols.append("r_Behavioral_Similarity_mean")
+    print(df_summary[disp_cols].to_string(index=False))
 
     # 5. Paired Statistical Tests: Lorentz vs Euclidean & Cosine
     paired_tests = []
     baseline_heads = ["euclidean", "cosine"]
     lorentz_heads = ["lorentz_fixed", "lorentz_learnable"]
 
+    eval_targets = ["WordNet_WUP", "Deep_Visual_Avgpool", "Semantic_MiniLM"]
+    if "Behavioral_Similarity" in ref_targets:
+        eval_targets.append("Behavioral_Similarity")
+
     for b_head in baseline_heads:
         for l_head in lorentz_heads:
             if b_head == l_head:
                 continue
-            b_df = df_sub[df_sub["head"] == b_head].sort_values("subject")
-            l_df = df_sub[df_sub["head"] == l_head].sort_values("subject")
+            b_df = df_sub[df_sub["head"] == b_head].sort_values("subject").reset_index(drop=True)
+            l_df = df_sub[df_sub["head"] == l_head].sort_values("subject").reset_index(drop=True)
 
             # Test delta_norm
             t_stat, p_val = stats.ttest_rel(l_df["delta_norm"], b_df["delta_norm"])
@@ -220,7 +242,7 @@ def evaluate_ablation():
             })
 
             # Test alignment on each target
-            for target in ["WordNet_WUP", "Deep_Visual_Avgpool", "Semantic_MiniLM", "Behavioral_Similarity"]:
+            for target in eval_targets:
                 diff = l_df[f"r_{target}"] - b_df[f"r_{target}"]
                 t_stat, p_val = stats.ttest_rel(l_df[f"r_{target}"], b_df[f"r_{target}"])
                 paired_tests.append({
@@ -283,15 +305,22 @@ def evaluate_ablation():
     ax.set_xticklabels(head_labels)
     ax.grid(True, linestyle=":", alpha=0.5)
 
-    # Panel C: Deep Visual vs Behavioral Alignment
+    # Panel C: Deep Visual vs Semantic Alignment
     ax = axes[2]
     vis_means = [df_sub[df_sub["head"] == h]["r_Deep_Visual_Avgpool"].mean() for h in heads]
-    beh_means = [df_sub[df_sub["head"] == h]["r_Behavioral_Similarity"].mean() for h in heads]
+    if "r_Behavioral_Similarity" in df_sub.columns:
+        second_means = [df_sub[df_sub["head"] == h]["r_Behavioral_Similarity"].mean() for h in heads]
+        second_label = "Behavioral Similarity"
+        second_color = "#9b59b6"
+    else:
+        second_means = [df_sub[df_sub["head"] == h]["r_Semantic_MiniLM"].mean() for h in heads]
+        second_label = "Semantic (MiniLM)"
+        second_color = "#e67e22"
     x_pos = np.arange(len(heads))
     width = 0.35
     ax.bar(x_pos - width/2, vis_means, width, label="Deep Visual (ResNet-50)", color="#3498db", alpha=0.9)
-    ax.bar(x_pos + width/2, beh_means, width, label="Behavioral Similarity", color="#9b59b6", alpha=0.9)
-    ax.set_title("C. Visual & Behavioral Target Alignment", fontsize=13, fontweight="bold")
+    ax.bar(x_pos + width/2, second_means, width, label=second_label, color=second_color, alpha=0.9)
+    ax.set_title(f"C. Visual & {second_label} Alignment", fontsize=13, fontweight="bold")
     ax.set_xlabel("Geometric Head", fontsize=11)
     ax.set_ylabel("Mean Pearson $r$", fontsize=11)
     ax.set_xticks(x_pos)

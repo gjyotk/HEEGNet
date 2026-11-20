@@ -37,11 +37,7 @@ import zipfile
 import argparse
 from pathlib import Path
 
-# Self-healing python interpreter resolution: ensure .venv python is used
 BASE_DIR = Path(__file__).resolve().parent
-VENV_PYTHON = BASE_DIR / ".venv/bin/python"
-if VENV_PYTHON.exists() and sys.executable != str(VENV_PYTHON):
-    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON)] + sys.argv)
 
 import numpy as np
 import pandas as pd
@@ -53,12 +49,14 @@ import torch.nn.functional as F
 from nets.model import EEGEncoder, ModularEEGNet, HEEGNet, EuclideanEEGNet
 import nets.functionals as fn
 from lib.lorentz.manifold import CustomLorentz
+from analysis.frechet import compute_lorentz_frechet_mean
 
 # Directory configuration
 RESULTS_DIR = BASE_DIR / "results/cv_representations"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 PREPROCESSED_DIR = BASE_DIR / "eeg-dataset/derivatives/preprocessed_eeg"
 HEEGNET_MODELS_DIR = BASE_DIR / "results/heegnet/models"
+FOUR_HEAD_MODELS_DIR = BASE_DIR / "results/four_head/models"
 RIGOROUS_MODELS_DIR = BASE_DIR / "results/rigorous_evaluation/models"
 REF_RDMS_PATH = BASE_DIR / "results/neural_geometry/rdms/stage1_final_reference_rdms.npz"
 
@@ -66,26 +64,8 @@ DEVICE = torch.device(os.environ.get("DEVICE", "cuda:0" if torch.cuda.is_availab
 
 
 # ==============================================================================
-# 1. RIEMANNIAN FRÉCHET MEAN ON LORENTZ HYPERBOLOID
+# 1. RIEMANNIAN DISTANCES ON LORENTZ HYPERBOLOID
 # ==============================================================================
-
-def compute_lorentz_frechet_mean(pts: torch.Tensor, manifold: CustomLorentz,
-                                 max_iter: int = 30, tol: float = 1e-5, lr: float = 0.5):
-    """
-    Computes exact Riemannian Fréchet / Karcher mean on the Lorentz hyperboloid:
-      mu_{k+1} = Exp_{mu_k}( (lr / N) * sum_i Log_{mu_k}(x_i) )
-    pts: (N, d+1) tensor satisfying <x, x>_L = -1/c.
-    """
-    mu = pts.mean(dim=0, keepdim=True)
-    mu = manifold.projx(mu)
-    for iteration in range(max_iter):
-        u = manifold.logmap(mu, pts)
-        v = u.mean(dim=0, keepdim=True)
-        v_norm = manifold.norm(v).item()
-        if v_norm < tol:
-            break
-        mu = manifold.expmap(mu, lr * v)
-    return mu.squeeze(0)
 
 
 def compute_lorentz_rdm(centroids: np.ndarray, curvature: float = 1.0, eps: float = 1e-7) -> np.ndarray:
@@ -176,12 +156,15 @@ def run_extraction():
         for pt in sorted(CV_MODELS_DIR.glob("*.pt")):
             model_type = "HEEGNet" if "heegnet" in pt.name else "EuclideanEEGNet"
             geom_type = "lorentz" if "heegnet" in pt.name else "euclidean"
+            m_sub = re.search(r"sub(\d+)", pt.name)
+            heldout_sub = f"sub-{int(m_sub.group(1)):02d}" if m_sub else None
             checkpoints[f"cv_{pt.stem}"] = {
                 "path": pt,
                 "arch": model_type,
                 "type": geom_type,
                 "curvature": 1.0,
-                "num_classes": 200
+                "num_classes": 200,
+                "heldout_subject": heldout_sub,
             }
 
     if (RIGOROUS_MODELS_DIR / "best_heegnet_hyperbolic.pt").exists():
@@ -190,19 +173,23 @@ def run_extraction():
             "arch": "HEEGNet",
             "type": "lorentz",
             "curvature": 1.0,
-            "num_classes": 1654
+            "num_classes": 1654,
+            "heldout_subjects": ["sub-06", "sub-07", "sub-08", "sub-09", "sub-10"],
         }
     if (RIGOROUS_MODELS_DIR / "best_eegnet_euclidean.pt").exists():
         checkpoints["eegnet_euclidean"] = {
             "path": RIGOROUS_MODELS_DIR / "best_eegnet_euclidean.pt",
             "arch": "EuclideanEEGNet",
             "type": "euclidean",
-            "num_classes": 1654
+            "num_classes": 1654,
+            "heldout_subjects": ["sub-06", "sub-07", "sub-08", "sub-09", "sub-10"],
         }
 
     # Discover 4-head checkpoints
     for head in ["euclidean", "cosine", "lorentz_fixed", "lorentz_learnable"]:
-        pt = HEEGNET_MODELS_DIR / f"4head_{head}_seed42_avg1.pt"
+        pt = FOUR_HEAD_MODELS_DIR / f"4head_{head}_seed42_avg1.pt"
+        if not pt.exists():
+            pt = HEEGNET_MODELS_DIR / f"4head_{head}_seed42_avg1.pt"
         if pt.exists():
             checkpoints[f"4head_{head}"] = {
                 "path": pt,
@@ -210,15 +197,17 @@ def run_extraction():
                 "head": head,
                 "type": "lorentz" if "lorentz" in head else ("cosine" if head == "cosine" else "euclidean"),
                 "curvature": 1.0,
-                "num_classes": 1654
+                "num_classes": 1654,
+                "heldout_subjects": ["sub-06", "sub-07", "sub-08", "sub-09", "sub-10"],
             }
 
     print(f"Found {len(checkpoints)} validated checkpoints:")
     for k, v in checkpoints.items():
-        print(f"  [{k}] -> {v['path'].name} (Arch: {v['arch']}, Type: {v['type']})")
+        target_info = v.get("heldout_subject") or v.get("heldout_subjects")
+        print(f"  [{k}] -> {v['path'].name} (Arch: {v['arch']}, Type: {v['type']}, Target: {target_info})")
 
-    # 2. Held-out test subjects: Sub-06 to Sub-10
-    test_subjects = ["sub-06", "sub-07", "sub-08", "sub-09", "sub-10"]
+    # 2. Iterate across all subjects: Sub-01 to Sub-10
+    all_subjects = [f"sub-{s:02d}" for s in range(1, 11)]
     n_concepts = 200
     n_reps = 80
 
@@ -233,8 +222,19 @@ def run_extraction():
 
     manifest_records = []
 
-    for sub_id in test_subjects:
-        print(f"\n--- Loading Held-Out Subject: {sub_id} ---")
+    for sub_id in all_subjects:
+        # Check if any model checkpoint targets this subject
+        relevant_ckpts = {}
+        for ckpt_name, ckpt_info in checkpoints.items():
+            if "heldout_subject" in ckpt_info and ckpt_info["heldout_subject"] == sub_id:
+                relevant_ckpts[ckpt_name] = ckpt_info
+            elif "heldout_subjects" in ckpt_info and sub_id in ckpt_info["heldout_subjects"]:
+                relevant_ckpts[ckpt_name] = ckpt_info
+
+        if not relevant_ckpts:
+            continue
+
+        print(f"\n--- Loading Held-Out Subject: {sub_id} ({len(relevant_ckpts)} models to evaluate) ---")
         try:
             X_test = load_subject_test_trials(sub_id, PREPROCESSED_DIR)
             print(f"Loaded and Euler-aligned {len(X_test)} trials for {sub_id}.")
@@ -245,7 +245,7 @@ def run_extraction():
         subject_rdms = {}
         subject_centroids = {}
 
-        for ckpt_name, ckpt_info in checkpoints.items():
+        for ckpt_name, ckpt_info in relevant_ckpts.items():
             print(f"  Extracting representations: {ckpt_name} ...")
             try:
                 # Instantiate architecture

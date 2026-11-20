@@ -103,17 +103,7 @@ def load_electrode_coords():
 # =============================================================================
 # Helper: Data Loading
 # =============================================================================
-def load_subject_data(sub_id: int):
-    """Load test EEG array: (200 concepts, 80 reps, 63 channels, 100 times)."""
-    zf_name = f"sub-{sub_id:02d}__63_channels.zip"
-    zf_path = os.path.join(PREPROCESSED_DIR, zf_name)
-    npy_name = f"sub-{sub_id:02d}__63_channels/preprocessed_eeg_test.npy"
-    with zipfile.ZipFile(zf_path) as zf:
-        with zf.open(npy_name) as fp:
-            raw = np.load(fp, allow_pickle=True).item()
-    data = raw["preprocessed_eeg_data"][:, :, :63, :]  # drop channel 64 ('stim')
-    ch_names = list(raw["ch_names"][:63])
-    return data, ch_names
+from data import load_subject_data
 
 
 # =============================================================================

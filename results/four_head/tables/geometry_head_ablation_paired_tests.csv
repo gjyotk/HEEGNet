@@ -1,0 +1,17 @@
+contrast,metric,mean_diff (Lorentz - Base),t_stat,raw_p_value,holm_p_value,significant_holm_05
+lorentz_learnable_vs_euclidean,delta_norm,-0.1548,-43.1953,1.7173279761137628e-06,3e-05,True
+lorentz_learnable_vs_cosine,delta_norm,-0.8464,-21.7529,2.6423214552827125e-05,0.0004,True
+lorentz_fixed_vs_cosine,delta_norm,-0.6778,-16.5064,7.888450118249511e-05,0.0011,True
+lorentz_fixed_vs_euclidean,delta_norm,0.0138,5.8787,0.004183783668794487,0.05439,False
+lorentz_fixed_vs_euclidean,r_Deep_Visual_Avgpool,-0.0029,-1.3802,0.23965292758642012,1.0,False
+lorentz_fixed_vs_cosine,r_Semantic_MiniLM,0.0047,1.3561,0.24656903405868186,1.0,False
+lorentz_learnable_vs_cosine,r_Semantic_MiniLM,0.0034,1.2532,0.2783984616539857,1.0,False
+lorentz_fixed_vs_euclidean,r_WordNet_WUP,-0.0028,-1.1399,0.31795363163613743,1.0,False
+lorentz_learnable_vs_cosine,r_Deep_Visual_Avgpool,0.0056,1.1211,0.3250182889677677,1.0,False
+lorentz_learnable_vs_cosine,r_WordNet_WUP,-0.0079,-0.9522,0.3949087769006181,1.0,False
+lorentz_learnable_vs_euclidean,r_WordNet_WUP,-0.0028,-0.9341,0.40312779199905296,1.0,False
+lorentz_fixed_vs_cosine,r_Deep_Visual_Avgpool,0.0047,0.8739,0.43148016659454824,1.0,False
+lorentz_fixed_vs_cosine,r_WordNet_WUP,-0.0079,-0.8707,0.4330460127477652,1.0,False
+lorentz_fixed_vs_euclidean,r_Semantic_MiniLM,0.001,0.8661,0.43527810068207556,1.0,False
+lorentz_learnable_vs_euclidean,r_Deep_Visual_Avgpool,-0.002,-0.7965,0.47033518725870443,1.0,False
+lorentz_learnable_vs_euclidean,r_Semantic_MiniLM,-0.0003,-0.2845,0.7901544887220137,1.0,False
